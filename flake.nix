@@ -55,14 +55,14 @@
             users.groups.caddy = { };
 
             # Public site: gated by Authelia + membership in the
-            # `gluck-files-admin` lldap group (the platform bootstraps
+            # `files-admin` lldap group (the platform bootstraps
             # the group from `requiredGroups`). `rootPath` (mutable
             # filesystem dir) rather than `root` (Nix store package)
             # because the whole point is that files change at runtime.
             services.kelliher-web.sites.gluck-files = {
               subdomains = [ "files" ];
               requireAuth = true;
-              requiredGroups = [ "gluck-files-admin" ];
+              requiredGroups = [ "files-admin" ];
               rootPath = "/var/lib/gluck-files";
               extraConfig = ''
                 file_server browse

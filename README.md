@@ -1,7 +1,7 @@
 # gluck-files
 
 Static file host at **files.kelliher.info**, gated by Authelia 2FA + the
-`gluck-files-admin` lldap group.
+`files-admin` lldap group.
 
 No backend process. Caddy's `file_server` serves a directory managed by
 the [`kelliher-web`](https://github.com/jack-work/kelliher-web) platform
@@ -14,7 +14,7 @@ of a file leaves the box.
   `/var/lib/gluck-files` on the host.
 - `https://files.kelliher.info/<any-relative-path>` → that file.
 - Any request without a valid Authelia session (or without membership
-  in the `gluck-files-admin` lldap group) is bounced to the portal for
+  in the `files-admin` lldap group) is bounced to the portal for
   password + TOTP.
 
 ## Uploading files
@@ -52,13 +52,13 @@ browser ──► https://files.kelliher.info/foo.pdf
                               │
                               ├─► forward_auth → Authelia
                               │     │
-                              │     ├─ has session? gluck-files-admin? ✓ → allow
+                              │     ├─ has session? files-admin? ✓ → allow
                               │     └─ otherwise → 302 to portal (password + TOTP)
                               │
                               └─► file_server /var/lib/gluck-files/foo.pdf
 ```
 
-Only members of the `gluck-files-admin` group in lldap can read
+Only members of the `files-admin` group in lldap can read
 anything. The group is bootstrapped automatically by the platform's
 identity layer from `requiredGroups`.
 
