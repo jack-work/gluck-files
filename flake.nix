@@ -320,18 +320,23 @@
             # marked as websites, and serves an index document or 404. There
             # is no directory listing, so links are the interface here.
             #
-            # THE BEARER BYPASS MUST DIE ON THIS HOSTNAME. `requireAuth` emits
-            # the house snippet `@no_bearer not header Authorization Bearer*`,
-            # so any request carrying a bearer-shaped header skips forward_auth
-            # entirely. That idiom is sound only when the backend verifies the
-            # JWT itself. Garage's WEB endpoint verifies nothing, by design:
-            # serving a website bucket to unsigned requests is its entire job,
-            # and Authelia is the only gate in front of it. Without the two
-            # lines below, `curl -H 'Authorization: Bearer x'` would read this
-            # bucket exactly as it reads the file_server today, and the
-            # migration would carry the hole it exists to close from a
-            # directory into an object store. Signed access is not turned away
-            # from the estate, it is sent to the door built for it: s3.<domain>.
+            # THE BEARER BYPASS STAYS DEAD ON THIS HOSTNAME. The platform now
+            # defaults `bearerBypass` to false, so `requireAuth` alone gates
+            # every request here, which is what this site needs: Garage's web
+            # endpoint verifies nothing by design, since serving a website
+            # bucket to unsigned requests is its entire job, and Authelia is
+            # the only gate in front of it.
+            #
+            # The two lines below are belt and braces, and they are not
+            # redundant. The platform's assertion that refuses `bearerBypass`
+            # on a static tree cannot fire here, because this site is a
+            # `proxyTo` like any API. So a future author could switch the
+            # bypass on for this hostname and reopen exactly the hole this
+            # service was built to close. These lines make that switch
+            # ineffective rather than merely inadvisable.
+            #
+            # Signed callers are not turned away from the estate, they are
+            # sent to the door built for them: s3.<domain>.
             services.kelliher-web.sites.gluck-files = {
               subdomains = [ "files" ];
               requireAuth = true;

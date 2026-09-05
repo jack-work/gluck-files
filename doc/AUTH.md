@@ -86,9 +86,9 @@ by design: serving a website bucket to unsigned requests is its entire job.
 Authelia is the only gate in front of it.
 
 So this site must **not** inherit the bearer bypass, or we would have rebuilt
-the original bug with a bucket where the file server used to be. Because
-`requireAuth = true` emits the bypass unconditionally, the site block closes it
-by hand, ahead of the proxy in route order:
+the original bug with a bucket where the file server used to be. The platform
+now defaults `bearerBypass` to false, and this site never opts in. The block
+also closes the bypass by hand, ahead of the proxy in route order:
 
 ```
 @bearer header Authorization Bearer*
@@ -97,6 +97,12 @@ respond @bearer 403
 
 Signed callers are not turned away from the estate. They are sent to the door
 built for them, `s3.kelliher.info`.
+
+Those two lines are belt and braces rather than duplication. The platform
+assertion that refuses `bearerBypass` on a static tree cannot fire here,
+because this site is a `proxyTo` like any API, so a future author could switch
+the bypass on and reopen the hole. The lines make that switch ineffective
+rather than merely inadvisable.
 
 Proved, with a real Caddy, a stub Authelia returning 401, and a decoy file:
 
