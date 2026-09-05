@@ -1,136 +1,151 @@
 # gluck-files
 
-Static file host at **files.kelliher.info**, gated by Authelia 2FA + the
-`files-admin` lldap group.
+Object storage on spain, backed by [Garage](https://garagehq.deuxfleurs.fr/)
+(S3-compatible), fronted by kelliher-web.
 
-No backend process. Caddy's `file_server` serves a directory managed by
-the [`kelliher-web`](https://github.com/jack-work/kelliher-web) platform
-storage abstraction; auth happens at the platform edge before any byte
-of a file leaves the box.
+Two hostnames, one daemon:
 
-## What you get
+| | |
+|---|---|
+| `s3.kelliher.info` | The S3 API. Authenticated by **SigV4**, no Authelia. Uploads, presigning, lifecycle. |
+| `files.kelliher.info` | The browser path. Authenticated by **Authelia** + the `files-admin` group. Read-only, links only. |
 
-- `https://files.kelliher.info/` → directory index (browsable) of
-  `/var/lib/gluck-files` on the host.
-- `https://files.kelliher.info/<any-relative-path>` → that file.
-- Any request without a valid Authelia session (or without membership
-  in the `files-admin` lldap group) is bounced to the portal for
-  password + TOTP.
+Why it is shaped this way — and the bug it replaces — is in
+[`doc/AUTH.md`](./doc/AUTH.md). Read that before changing anything about auth.
 
-## Uploading files
+## Buckets
 
-The service does not expose a write API. Upload out-of-band, straight
-into the volume:
+| Bucket | Reachable from | Retention |
+|---|---|---|
+| `files` | both hostnames | forever, until you delete it |
+| `graveyard` | `s3.` only (private, never a website) | `1d/` `7d/` `30d/` prefixes expire on their names |
 
-```bash
-# Single file
-scp report.pdf spain:/var/lib/gluck-files/
+`files` is not a free choice: Garage's web endpoint resolves the bucket from
+the `Host` header, so `files.kelliher.info` **requires** a bucket called
+`files`.
 
-# A whole tree
-rsync -avh --delete ./release-artifacts/ spain:/var/lib/gluck-files/release-artifacts/
-```
+The graveyard mirrors `/var/tmp/graveyard` on the same box on purpose. One
+vocabulary for expiry across the estate: `7d/` means seven days in the bucket
+exactly as it does on the filesystem, and in both cases the *name is the
+policy* — a lifecycle rule reads its day count from the same string that names
+the prefix, so they cannot drift apart.
 
-Files land visible immediately — Caddy reads the live path, not a
-Nix-store snapshot. `Cache-Control: no-store` is set so browsers won't
-cache stale copies while you're iterating.
+Retention is a property of the bucket, not a timer anybody maintains. Every
+bucket also aborts incomplete multipart uploads after a day: orphaned parts
+belong to no object, appear in no listing, and are noticed only when the disk
+fills.
 
-Ownership on the mount point is `caddy:caddy` (see below). If you `scp`
-as your login user, you'll get your uid — fine, since the tree is
-world-readable (`0755` + `umask 022` by default). If you'd rather keep
-everything owned by caddy:
+## Credentials
 
-```bash
-ssh spain "sudo chown -R caddy:caddy /var/lib/gluck-files"
-```
+Your key is minted by Garage and lives in hush. It is never in the Nix store,
+never in a unit file, never in argv, never in your shell history.
 
-## Auth flow
-
-```
-browser ──► https://files.kelliher.info/foo.pdf
-   │
-   └─► Cloudflare tunnel ─► Caddy (:8780)
-                              │
-                              ├─► forward_auth → Authelia
-                              │     │
-                              │     ├─ has session? files-admin? ✓ → allow
-                              │     └─ otherwise → 302 to portal (password + TOTP)
-                              │
-                              └─► file_server /var/lib/gluck-files/foo.pdf
-```
-
-Only members of the `files-admin` group in lldap can read
-anything. The group is bootstrapped automatically by the platform's
-identity layer from `requiredGroups`.
-
-## Storage
-
-The volume is declared through the platform's storage contract:
-
-```nix
-services.kelliher-web.storage.volumes.gluck-files = {
-  mountPoint = "/var/lib/gluck-files";
-  owner = "caddy";
-  group = "caddy";
-  mode = "0755";
-  quota = "50G";
-  recordsize = "1M";      # tuned for large-file streaming (zfs only)
-  snapshotProfile = "media";
-};
-```
-
-- On `services.kelliher-web.storage.backend = "plain"` (default) this
-  is just a directory under `/var/lib/`.
-- On `services.kelliher-web.storage.backend = "zfs"` it becomes a
-  dedicated dataset with hard `refquota`, `zstd` compression,
-  `recordsize=1M`, and sanoid retention per the `media` profile.
-
-The interface downstream (this module) sees is identical either way.
-Flip the backend at the platform level to migrate.
-
-## Deploying
-
-This flake exposes `nixosModules.default`. Consume it from the host's
-system flake alongside `kelliher-web`:
-
-```nix
-{
-  inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    kelliher-web.url = "github:jack-work/kelliher-web";
-    gluck-files.url  = "github:jack-work/gluck-files";
-  };
-
-  outputs = { self, nixpkgs, kelliher-web, gluck-files, ... }: {
-    nixosConfigurations.spain = nixpkgs.lib.nixosSystem {
-      modules = [
-        kelliher-web.nixosModules.default
-        gluck-files.nixosModules.default
-        {
-          services.kelliher-web = {
-            enable = true;
-            baseDomains = [ "kelliher.info" ];
-            # …tunnelTokenFile, storage backend, etc.
-          };
-          services.gluck-files.enable = true;
-        }
-      ];
-    };
-  };
-}
-```
-
-Then, on spain:
+Minting it, once, in one pipeline so the secret is never displayed:
 
 ```bash
-sudo nixos-rebuild switch --flake .
+ssh spain@spain 'sudo garage key create jack-laptop' | hush secret set files
 ```
 
-## Options
+Then use it through hush, which puts it in the environment of one process and
+nowhere else:
 
-| Option | Type | Default | Notes |
-|---|---|---|---|
-| `services.gluck-files.enable` | bool | `false` | Turn it all on. |
+```bash
+hush files aws --endpoint-url https://s3.kelliher.info s3 ls s3://files/
+```
 
-That's the whole surface. There is no port to configure — nothing
-listens. There's no auth to configure — the platform does it. There's
-no path to configure — it's always `/var/lib/gluck-files`.
+The bootstrap unit mints a **separate** key for itself to apply lifecycle
+rules, so revoking a laptop never disarms retention.
+
+## Uploading
+
+```bash
+hush files aws --endpoint-url https://s3.kelliher.info s3 cp report.pdf s3://files/
+hush files aws --endpoint-url https://s3.kelliher.info s3 sync ./tree/ s3://files/tree/
+```
+
+**Cloudflare caps request bodies at 100 MB** on the free plan, and times out
+origins at 100 s. Both are answered by multipart uploads with parts under the
+cap, configured *into* the hush command rather than remembered:
+
+```
+multipart_threshold = 32MB
+multipart_chunksize = 32MB
+```
+
+A limit worked around by discipline is a limit that will eventually bite. If
+you are moving something genuinely large, skip the tunnel entirely:
+
+```bash
+ssh -L 3900:127.0.0.1:3900 spain@spain -N &
+hush files aws --endpoint-url http://127.0.0.1:3900 s3 cp big.iso s3://files/
+```
+
+## Sharing a file with someone
+
+Presign it. The link carries its own expiry, so the grant ends on a schedule
+instead of living forever in a chat history:
+
+```bash
+hush files aws --endpoint-url https://s3.kelliher.info \
+  s3 presign s3://files/report.pdf --expires-in 86400
+```
+
+SigV4 caps presigned URLs at 7 days. For something you want gone regardless of
+who kept the link, put it in the graveyard instead — the object expires even if
+the URL does not:
+
+```bash
+hush files aws --endpoint-url https://s3.kelliher.info s3 cp draft.pdf s3://graveyard/7d/
+```
+
+## Browsing
+
+`files.kelliher.info/<path>` serves an object, behind Authelia.
+
+**There is no directory listing.** Garage's web endpoint serves an index
+document or 404; it has no autoindex, unlike the `file_server browse` this
+service used to run. Links are the interface. If you want an index at a prefix,
+put one there — an `index.html` uploaded to a prefix is served for `/`, which
+is the supported way to get browsing back and costs nothing to add later.
+
+## Operating
+
+```bash
+ssh spain@spain 'sudo garage status'                  # node, layout, capacity
+ssh spain@spain 'sudo garage bucket info files'       # size, object count, keys
+ssh spain@spain 'journalctl -u garage -f'
+ssh spain@spain 'journalctl -u gluck-files-bootstrap' # layout/bucket/lifecycle setup
+```
+
+The bootstrap unit is idempotent and guards on observed state: `bucket create`
+and `layout apply` both exit non-zero once their work is done, so it checks
+before acting rather than re-running blindly.
+
+## Durability, stated plainly
+
+One node, one NVMe, `replication_factor = 1`. This buys **availability, not
+durability** — no replication factor helps when there is one disk. Treat a
+bucket as a convenience copy, not a backup.
+
+## Ports
+
+All loopback. Only Caddy reaches them; RPC never leaves the box.
+
+| 3900 | S3 API | fronted at `s3.kelliher.info` |
+| 3901 | RPC | single node, never through the firewall |
+| 3902 | web | fronted at `files.kelliher.info` |
+| 3903 | admin | never proxied |
+
+## Rollback
+
+`/var/lib/gluck-files` still holds the pre-migration tree, untouched, and
+nothing serves it. The old `file_server` shape lives in git history. Reverting
+is one commit and a deploy, with the data still on disk because we never
+deleted it.
+
+The old Caddy block could not be left in place, tempting as it sounds: it
+matched `files.kelliher.info`, which the web endpoint now owns, and two blocks
+cannot hold one hostname.
+
+Delete the directory in a deliberate change once the bucket has carried real
+traffic — not as a side effect of this one.
