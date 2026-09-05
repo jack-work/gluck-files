@@ -10,7 +10,7 @@ Two hostnames, one daemon:
 | `s3.kelliher.info` | The S3 API. Authenticated by **SigV4**, no Authelia. Uploads, presigning, lifecycle. |
 | `files.kelliher.info` | The browser path. Authenticated by **Authelia** + the `files-admin` group. Read-only, links only. |
 
-Why it is shaped this way — and the bug it replaces — is in
+Why it is shaped this way, and the bug it replaces, is in
 [`doc/AUTH.md`](./doc/AUTH.md). Read that before changing anything about auth.
 
 ## Buckets
@@ -27,7 +27,7 @@ the `Host` header, so `files.kelliher.info` **requires** a bucket called
 The graveyard mirrors `/var/tmp/graveyard` on the same box on purpose. One
 vocabulary for expiry across the estate: `7d/` means seven days in the bucket
 exactly as it does on the filesystem, and in both cases the *name is the
-policy* — a lifecycle rule reads its day count from the same string that names
+policy*: a lifecycle rule reads its day count from the same string that names
 the prefix, so they cannot drift apart.
 
 Retention is a property of the bucket, not a timer anybody maintains. Every
@@ -91,7 +91,7 @@ hush files aws --endpoint-url https://s3.kelliher.info \
 ```
 
 SigV4 caps presigned URLs at 7 days. For something you want gone regardless of
-who kept the link, put it in the graveyard instead — the object expires even if
+who kept the link, put it in the graveyard instead. The object expires even if
 the URL does not:
 
 ```bash
@@ -105,7 +105,7 @@ hush files aws --endpoint-url https://s3.kelliher.info s3 cp draft.pdf s3://grav
 **There is no directory listing.** Garage's web endpoint serves an index
 document or 404; it has no autoindex, unlike the `file_server browse` this
 service used to run. Links are the interface. If you want an index at a prefix,
-put one there — an `index.html` uploaded to a prefix is served for `/`, which
+put one there: an `index.html` uploaded to a prefix is served for `/`, which
 is the supported way to get browsing back and costs nothing to add later.
 
 ## Operating
@@ -124,7 +124,7 @@ before acting rather than re-running blindly.
 ## Durability, stated plainly
 
 One node, one NVMe, `replication_factor = 1`. This buys **availability, not
-durability** — no replication factor helps when there is one disk. Treat a
+durability**. No replication factor helps when there is one disk. Treat a
 bucket as a convenience copy, not a backup.
 
 ## Ports
@@ -148,4 +148,4 @@ matched `files.kelliher.info`, which the web endpoint now owns, and two blocks
 cannot hold one hostname.
 
 Delete the directory in a deliberate change once the bucket has carried real
-traffic — not as a side effect of this one.
+traffic, not as a side effect of this one.

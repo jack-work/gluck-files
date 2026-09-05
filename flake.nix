@@ -1,5 +1,5 @@
 {
-  description = "gluck-files — object storage on spain, backed by Garage (S3-compatible)";
+  description = "gluck-files: object storage on spain, backed by Garage (S3-compatible)";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
@@ -128,7 +128,7 @@
         in
         {
           options.services.gluck-files = {
-            enable = lib.mkEnableOption "gluck-files — Garage object storage behind kelliher-web";
+            enable = lib.mkEnableOption "gluck-files: Garage object storage behind kelliher-web";
 
             rpcSecretFile = lib.mkOption {
               type = lib.types.path;
@@ -317,14 +317,14 @@
             # ── the browser path ──────────────────────────────────────────
             # Authelia gates it, exactly as before. What changed is what sits
             # behind: Garage's web endpoint serves only buckets explicitly
-            # marked as websites, and serves an index document or 404 — there
+            # marked as websites, and serves an index document or 404. There
             # is no directory listing, so links are the interface here.
             #
             # THE BEARER BYPASS MUST DIE ON THIS HOSTNAME. `requireAuth` emits
             # the house snippet `@no_bearer not header Authorization Bearer*`,
             # so any request carrying a bearer-shaped header skips forward_auth
             # entirely. That idiom is sound only when the backend verifies the
-            # JWT itself. Garage's WEB endpoint verifies nothing, by design —
+            # JWT itself. Garage's WEB endpoint verifies nothing, by design:
             # serving a website bucket to unsigned requests is its entire job,
             # and Authelia is the only gate in front of it. Without the two
             # lines below, `curl -H 'Authorization: Bearer x'` would read this

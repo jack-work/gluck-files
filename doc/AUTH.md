@@ -17,14 +17,14 @@ forward_auth @no_bearer 127.0.0.1:9091 { … }
 
 Read it carefully. `forward_auth` runs **only** for requests matching
 `@no_bearer`. A request carrying an `Authorization: Bearer …` header does not
-get authenticated — it gets *forwarded*, on the understanding that the backend
+get authenticated. It gets *forwarded*, on the understanding that the backend
 will verify the JWT itself. That understanding is written down in the platform
 module, and for herald, calendar and kfin it is true: they check the token
 against Authelia's JWKS before doing anything.
 
 `gluck-files` had **no backend**. Nothing ran behind the `file_server`. So no
 code anywhere in the request path ever looked at that JWT, and the bypass was
-not a bypass to a stricter check — it was a hole:
+not a bypass to a stricter check. It was a hole:
 
 ```
 curl -H 'Authorization: Bearer anything-at-all' https://files.kelliher.info/wfh/Rental_Agreement.pdf
@@ -47,7 +47,7 @@ Garage changes the category of the guarantee. It verifies AWS SigV4 on every
 request against keys it minted itself. The signature covers the method, the
 path, the headers and a timestamp, so a request cannot be replayed, edited, or
 guessed. There is no header you can *shape* your way past, because there is no
-credential-shaped-thing being trusted — there is a signature being checked.
+credential-shaped-thing being trusted. There is a signature being checked.
 
 The bypass stops being dangerous on the S3 hostname not because we removed it
 (we did remove it) but because the thing behind it finally does real work.
@@ -63,10 +63,10 @@ through one hostname breaks one of them.
 | `s3.kelliher.info` | S3 API | 3900 | **SigV4 only.** No Authelia, deliberately. |
 | `files.kelliher.info` | web | 3902 | **Authelia only**, and the bearer bypass is explicitly closed. |
 
-### `s3.kelliher.info` — `requireAuth = false` is the correct setting
+### `s3.kelliher.info`: `requireAuth = false` is the correct setting
 
 This looks alarming in a diff and is not. `forward_auth` here would add no
-security — every request is already verified by the backend — and would break
+security, since every request is already verified by the backend, and would break
 every S3 client, since a client that can sign a request cannot follow a login
 redirect. The site is not unauthenticated; it is authenticated by something
 better than a session cookie.
@@ -79,7 +79,7 @@ GET with 'Authorization: Bearer anything-at-all'  -> 400
 presigned GET                                     -> 200
 ```
 
-### `files.kelliher.info` — Authelia, with the bypass nailed shut
+### `files.kelliher.info`: Authelia, with the bypass nailed shut
 
 Garage's **web** endpoint is the static-website endpoint. It verifies nothing,
 by design: serving a website bucket to unsigned requests is its entire job.
@@ -95,7 +95,7 @@ by hand, ahead of the proxy in route order:
 respond @bearer 403
 ```
 
-Signed callers are not turned away from the estate — they are sent to the door
+Signed callers are not turned away from the estate. They are sent to the door
 built for them, `s3.kelliher.info`.
 
 Proved, with a real Caddy, a stub Authelia returning 401, and a decoy file:
@@ -111,7 +111,7 @@ with them,               no session, no header                  -> 401 (Authelia
 `files` is marked as a website; `graveyard` is not. Garage answers **404** on
 the web endpoint for a bucket without website access, whatever `Host` header
 the request carries. So the private bucket is unreachable from the browser
-plane *by construction*, not by a rule anyone maintains — forging the Host
+plane *by construction*, not by a rule anyone maintains. Forging the Host
 header does not reach it.
 
 ## The generalisation, for whoever adds the next service
