@@ -8,6 +8,12 @@ Two hostnames, one daemon:
 | | |
 |---|---|
 | `s3.kelliher.info` | The S3 API. Authenticated by **SigV4**, no Authelia. Uploads, presigning, lifecycle. |
+
+Naming, stated once: **buckets carry the real names** (`files`,
+`graveyard`). The `s3.` subdomain names a *protocol door*, not a thing —
+it exists because the API and the website need different authentication,
+and the `s3://` in every command is awscli's URI scheme, which nobody
+gets to rename.
 | `files.kelliher.info` | The browser path. Authenticated by **Authelia** + the `files-admin` group. Read-only, links only. |
 
 Why it is shaped this way, and the bug it replaces, is in
@@ -50,8 +56,13 @@ Then use it through hush, which puts it in the environment of one process and
 nowhere else:
 
 ```bash
-hush files aws --endpoint-url https://s3.kelliher.info s3 ls s3://files/
+hush files s3 ls s3://files/
 ```
+
+The `aws` binary, the endpoint and the region are baked into the hush
+command spec (`~/.config/hush/commands/files/command.toml`), so they are
+never repeated on the command line. `hush files` *is* `aws`, pre-aimed
+at spain.
 
 The bootstrap unit mints a **separate** key for itself to apply lifecycle
 rules, so revoking a laptop never disarms retention.
@@ -59,9 +70,22 @@ rules, so revoking a laptop never disarms retention.
 ## Uploading
 
 ```bash
-hush files aws --endpoint-url https://s3.kelliher.info s3 cp report.pdf s3://files/
-hush files aws --endpoint-url https://s3.kelliher.info s3 sync ./tree/ s3://files/tree/
+hush files s3 cp report.pdf s3://files/
+hush files s3 sync ./tree/ s3://files/tree/
 ```
+
+**awscli ≥ 2.23 needs one config line, once.** New clients send CRC
+checksums by default and Garage refuses them — the upload transfers
+completely and *then* fails with `InvalidRequest: invalid checksum
+algorithm`, which reads like a server bug. In `~/.aws/config`:
+
+```ini
+[default]
+request_checksum_calculation = when_required
+response_checksum_validation = when_required
+```
+
+This is the pre-2.23 behaviour and is harmless against real AWS.
 
 **Cloudflare caps request bodies at 100 MB** on the free plan, and times out
 origins at 100 s. Both are answered by multipart uploads with parts under the
@@ -77,8 +101,11 @@ you are moving something genuinely large, skip the tunnel entirely:
 
 ```bash
 ssh -L 3900:127.0.0.1:3900 spain@spain -N &
-hush files aws --endpoint-url http://127.0.0.1:3900 s3 cp big.iso s3://files/
+hush files s3 cp big.iso s3://files/ --endpoint-url http://127.0.0.1:3900
 ```
+
+(A trailing `--endpoint-url` overrides the one baked into the spec:
+awscli takes the last occurrence.)
 
 ## Sharing a file with someone
 
@@ -86,8 +113,7 @@ Presign it. The link carries its own expiry, so the grant ends on a schedule
 instead of living forever in a chat history:
 
 ```bash
-hush files aws --endpoint-url https://s3.kelliher.info \
-  s3 presign s3://files/report.pdf --expires-in 86400
+hush files s3 presign s3://files/report.pdf --expires-in 86400
 ```
 
 SigV4 caps presigned URLs at 7 days. For something you want gone regardless of
@@ -95,7 +121,7 @@ who kept the link, put it in the graveyard instead. The object expires even if
 the URL does not:
 
 ```bash
-hush files aws --endpoint-url https://s3.kelliher.info s3 cp draft.pdf s3://graveyard/7d/
+hush files s3 cp draft.pdf s3://graveyard/7d/
 ```
 
 ## Browsing
