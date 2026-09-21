@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ title }}</title>
+<link rel="icon" href="data:,">
+<!-- zanni:fontpack -->
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: var(--fontpack-prose);
+    font-size: 18px;
+    line-height: 1.5;
+    padding: 34px 20px 64px;
+  }
+
+  main { max-width: 1000px; margin: 0 auto; position: relative; }
+
+  .crumbs {
+    font-family: var(--fontpack-mono);
+    font-size: 19px;
+    letter-spacing: 0.06em;
+    margin-bottom: 4px;
+    word-break: break-all;
+  }
+  .crumbs a { color: var(--oxblood); text-decoration: none; }
+  .crumbs a:hover { text-decoration: underline; }
+  .crumbs .sep { color: var(--gold); margin: 0 6px; }
+  .crumbs .here { color: var(--ink); }
+
+  h1 {
+    font-family: var(--fontpack-display);
+    font-size: 52px;
+    font-weight: 400;
+    line-height: 1.1;
+    margin-bottom: 10px;
+  }
+
+  .tally {
+    font-family: var(--fontpack-mono);
+    font-size: 16px;
+    color: var(--muted);
+    margin-bottom: 22px;
+  }
+
+  .sheet {
+    border: 3px solid var(--gold);
+    background: var(--paper);
+  }
+
+  table { width: 100%; border-collapse: collapse; }
+
+  th {
+    font-family: var(--fontpack-mono);
+    font-size: 15px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    text-align: left;
+    color: var(--muted);
+    padding: 10px 16px;
+    border-bottom: 2px solid rgba(162, 118, 42, 0.5);
+  }
+  th.num { text-align: right; }
+
+  td {
+    padding: 7px 16px;
+    border-bottom: 1px solid rgba(162, 118, 42, 0.22);
+    vertical-align: baseline;
+  }
+  tr:last-child td { border-bottom: 0; }
+  tr:hover td { background: rgba(162, 118, 42, 0.09); }
+
+  .glyph {
+    font-family: var(--fontpack-mono);
+    color: var(--gold);
+    width: 1.6em;
+    padding-right: 0;
+  }
+
+  .name a { color: var(--ink); text-decoration: none; word-break: break-all; }
+  .name a:hover { color: var(--oxblood); text-decoration: underline; }
+  .name .dir { color: var(--oxblood); }
+
+  td.size, td.when {
+    font-family: var(--fontpack-mono);
+    font-size: 15px;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  td.size { text-align: right; }
+
+  .empty {
+    font-style: italic;
+    color: var(--muted);
+    padding: 26px 16px;
+  }
+
+  footer {
+    margin-top: 20px;
+    font-family: var(--fontpack-mono);
+    font-size: 15px;
+    color: var(--muted);
+  }
+  footer a { color: var(--oxblood); }
+
+  @media (max-width: 620px) {
+    body { font-size: 17px; padding: 20px 12px 40px; }
+    h1 { font-size: 36px; }
+    td.when, th.when { display: none; }
+    td, th { padding-left: 10px; padding-right: 10px; }
+  }
+</style>
+</head>
+<body class="gesso">
+<!-- zanni:boil -->
+<!-- zanni:gesso -->
+
+<main>
+  <div class="crumbs boil-text">
+    <a href="/">files</a>{% for c in crumbs %}<span class="sep">/</span>{% if loop.last %}<span class="here">{{ c.name }}</span>{% else %}<a href="{{ c.href }}">{{ c.name }}</a>{% endif %}{% endfor %}
+  </div>
+
+  <h1 class="boil-text">{{ heading }}</h1>
+  <div class="tally boil-text">{{ tally }}</div>
+
+  <div class="sheet boil-ui">
+    {% if dirs or files %}
+    <table>
+      <thead>
+        <tr>
+          <th></th>
+          <th>Name</th>
+          <th class="num">Size</th>
+          <th class="when">Modified</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if parent is not none %}
+        <tr>
+          <td class="glyph">&#8593;</td>
+          <td class="name"><a class="dir" href="{{ parent }}">..</a></td>
+          <td class="size"></td>
+          <td class="when"></td>
+        </tr>
+        {% endif %}
+        {% for d in dirs %}
+        <tr>
+          <td class="glyph">&#9635;</td>
+          <td class="name"><a class="dir" href="{{ d.href }}">{{ d.name }}/</a></td>
+          <td class="size"></td>
+          <td class="when"></td>
+        </tr>
+        {% endfor %}
+        {% for f in files %}
+        <tr>
+          <td class="glyph">&#9671;</td>
+          <td class="name"><a href="{{ f.href }}">{{ f.name }}</a></td>
+          <td class="size">{{ f.size }}</td>
+          <td class="when">{{ f.when }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty">Nothing here.</div>
+    {% endif %}
+  </div>
+
+  <footer class="boil-text">{{ bucket }} on spain{% if truncated %} &middot; listing truncated at {{ shown }} entries{% endif %}</footer>
+</main>
+</body>
+</html>

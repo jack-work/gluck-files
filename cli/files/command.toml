@@ -1,0 +1,12 @@
+description = "garage S3 on spain"
+exec = "/usr/bin/aws"
+args = ["--endpoint-url", "https://s3.kelliher.info", "--region", "spain"]
+
+# awscli 2.23 sends CRC checksums Garage rejects. docs/command-env.md.
+[env]
+AWS_REQUEST_CHECKSUM_CALCULATION = "WHEN_REQUIRED"
+AWS_RESPONSE_CHECKSUM_VALIDATION = "WHEN_REQUIRED"
+
+[secrets]
+access_key_id = "AWS_ACCESS_KEY_ID"
+secret_access_key = "AWS_SECRET_ACCESS_KEY"

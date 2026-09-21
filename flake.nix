@@ -2,9 +2,11 @@
   description = "gluck-files: object storage on spain, backed by Garage (S3-compatible)";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  inputs.zanni.url = "github:jack-work/zanni";
+  inputs.zanni.inputs.nixpkgs.follows = "nixpkgs";
 
   outputs =
-    { self, nixpkgs, ... }:
+    { self, nixpkgs, zanni, ... }:
     let
       nixosModule =
         { config, lib, pkgs, ... }:
@@ -44,6 +46,22 @@
           };
 
           lifecycleFile = pkgs.writeText "gluck-files-lifecycle.json" lifecycleJson;
+
+          # doc/LISTER.md
+          listerTemplate = pkgs.runCommand "gluck-files-lister-template.html" {
+            nativeBuildInputs = [ zanni.packages.${pkgs.system}.default ];
+          } ''
+            zanni-inline -c boil -c gesso -c fontpack \
+              ${./lister/template.html.in} -o $out
+            zanni-check $out
+          '';
+
+          listerPython = pkgs.python3.withPackages (ps: with ps; [
+            flask
+            waitress
+            boto3
+            markupsafe
+          ]);
 
           bootstrap = pkgs.writeShellApplication {
             name = "gluck-files-bootstrap";
@@ -123,6 +141,27 @@
                   --bucket "$bucket" \
                   --lifecycle-configuration "file://${lifecycleFile}"
               done
+
+              # ── the lister's key ──────────────────────────────────────────
+              # doc/LISTER.md, "the key".
+              if ! ${garageCli} key list | grep -qw "${cfg.listerKeyName}"; then
+                ${garageCli} key create ${cfg.listerKeyName} >/dev/null
+              fi
+              ${garageCli} bucket allow --read \
+                ${cfg.bucket} --key ${cfg.listerKeyName} >/dev/null
+              ${garageCli} bucket deny --write --owner \
+                ${cfg.bucket} --key ${cfg.listerKeyName} >/dev/null 2>&1 || true
+
+              lister_info=$(${garageCli} key info --show-secret ${cfg.listerKeyName})
+              umask 077
+              tmp=$(mktemp ${cfg.listerCredentialsFile}.XXXXXX)
+              {
+                echo "AWS_ACCESS_KEY_ID=$(echo "$lister_info" | sed -n 's/^Key ID: *//p')"
+                echo "AWS_SECRET_ACCESS_KEY=$(echo "$lister_info" | sed -n 's/^Secret key: *//p')"
+              } > "$tmp"
+              chgrp ${cfg.listerUser} "$tmp"
+              chmod 0440 "$tmp"
+              mv -f "$tmp" ${cfg.listerCredentialsFile}
             '';
           };
         in
@@ -220,6 +259,36 @@
               '';
             };
 
+            listerPort = lib.mkOption {
+              type = lib.types.port;
+              default = 9099;
+              description = "Loopback port for the directory lister.";
+            };
+
+            listerUser = lib.mkOption {
+              type = lib.types.str;
+              default = "gluck-files-lister";
+              description = "User and group the lister runs as.";
+            };
+
+            listerKeyName = lib.mkOption {
+              type = lib.types.str;
+              default = "files-lister";
+              description = ''
+                Garage key the lister reads with. Read-only on the durable
+                bucket and granted no access to the graveyard.
+              '';
+            };
+
+            listerCredentialsFile = lib.mkOption {
+              type = lib.types.path;
+              default = "/var/lib/gluck-files-lister/credentials";
+              description = ''
+                Where the bootstrap writes the lister's key. Mode 0440, group
+                listerUser, never printed and never a sops secret.
+              '';
+            };
+
             ports = {
               s3 = lib.mkOption {
                 type = lib.types.port;
@@ -300,6 +369,55 @@
               Group = "garage";
             };
 
+            users.users.${cfg.listerUser} = {
+              isSystemUser = true;
+              group = cfg.listerUser;
+            };
+            users.groups.${cfg.listerUser} = { };
+            users.users.garage.extraGroups = [ cfg.listerUser ];
+
+            systemd.tmpfiles.rules = [
+              "d ${builtins.dirOf cfg.listerCredentialsFile} 0750 garage ${cfg.listerUser} -"
+            ];
+
+            systemd.services.gluck-files-lister = {
+              description = "Directory listing for the ${cfg.bucket} bucket";
+              after = [ "gluck-files-bootstrap.service" ];
+              requires = [ "gluck-files-bootstrap.service" ];
+              wantedBy = [ "multi-user.target" ];
+              environment = {
+                LISTER_BUCKET = cfg.bucket;
+                LISTER_ENDPOINT = "http://127.0.0.1:${toString cfg.ports.s3}";
+                LISTER_REGION = cfg.region;
+                LISTER_TEMPLATE = listerTemplate;
+                LISTER_PORT = toString cfg.listerPort;
+                AWS_EC2_METADATA_DISABLED = "true";
+              };
+              serviceConfig = {
+                ExecStart = "${listerPython}/bin/python3 ${./lister/lister.py}";
+                EnvironmentFile = cfg.listerCredentialsFile;
+                User = cfg.listerUser;
+                Group = cfg.listerUser;
+                Restart = "on-failure";
+                RestartSec = 5;
+                NoNewPrivileges = true;
+                PrivateTmp = true;
+                PrivateDevices = true;
+                ProtectSystem = "strict";
+                ProtectHome = true;
+                ProtectKernelTunables = true;
+                ProtectKernelModules = true;
+                ProtectControlGroups = true;
+                RestrictAddressFamilies = [ "AF_INET" "AF_UNIX" ];
+                RestrictNamespaces = true;
+                LockPersonality = true;
+                MemoryDenyWriteExecute = true;
+                SystemCallFilter = [ "@system-service" ];
+                SystemCallArchitectures = "native";
+                CapabilityBoundingSet = "";
+              };
+            };
+
             systemd.services.gluck-files-bootstrap = {
               description = "Bring Garage to the layout, buckets and lifecycle gluck-files expects";
               after = [ "garage.service" ];
@@ -346,6 +464,14 @@
                 @bearer header Authorization Bearer*
                 respond @bearer 403
                 header Cache-Control "no-store"
+
+                # doc/LISTER.md, "the split". A trailing slash is a directory
+                # and goes to the lister; everything else is an object and
+                # streams from Garage through the terminal reverse_proxy.
+                @dir path_regexp dir (/|^)$
+                handle @dir {
+                  reverse_proxy localhost:${toString cfg.listerPort}
+                }
               '';
             };
 
@@ -396,9 +522,32 @@
             ];
           };
         };
+      forAllSystems = nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" ];
     in
     {
       nixosModules.default = nixosModule;
       nixosModules.gluck-files = nixosModule;
+
+      # doc/CLI.md
+      packages = forAllSystems (system:
+        let pkgs = nixpkgs.legacyPackages.${system}; in {
+          files-cli = pkgs.runCommand "files-cli" { } ''
+            install -Dm444 ${./cli/files/command.toml} $out/files/command.toml
+          '';
+
+          files-cli-install = pkgs.writeShellApplication {
+            name = "files-cli-install";
+            runtimeInputs = [ pkgs.coreutils ];
+            text = ''
+              dest="''${XDG_CONFIG_HOME:-$HOME/.config}/hush/commands/files"
+              mkdir -p "$dest"
+              install -m444 ${./cli/files/command.toml} "$dest/command.toml"
+              echo "installed $dest/command.toml"
+              if [ ! -e "$dest/secrets.toml" ]; then
+                echo "no secrets.toml: run 'hush secrets set files' or write it by hand" >&2
+              fi
+            '';
+          };
+        });
     };
 }
