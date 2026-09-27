@@ -16,6 +16,30 @@
           garagePkg = pkgs.garage_1_x;
           garageCli = "${garagePkg}/bin/garage -c /etc/garage.toml";
 
+          baseDomain = lib.head config.services.kelliher-web.baseDomains;
+
+          # Buckets reachable on the browser path. The graveyard is not one of
+          # them, and that is the boundary doc/AUTH.md relies on.
+          websiteBuckets = [ cfg.bucket cfg.shareBucket ];
+          allBuckets = websiteBuckets ++ [ cfg.graveyardBucket ];
+
+          # Shared by every hostname fronting Garage's web endpoint. Declared
+          # once so the two sites cannot drift: doc/AUTH.md's `respond @bearer
+          # 403` is a security property, not a per-site preference.
+          browserPathConfig = ''
+            @bearer header Authorization Bearer*
+            respond @bearer 403
+            header Cache-Control "no-store"
+
+            # doc/LISTER.md, "the split". A trailing slash is a directory
+            # and goes to the lister; everything else is an object and
+            # streams from Garage through the terminal reverse_proxy.
+            @dir path_regexp dir (/|^)$
+            handle @dir {
+              reverse_proxy localhost:${toString cfg.listerPort}
+            }
+          '';
+
           # The retention vocabulary, declared ONCE. These strings name the
           # prefixes in the graveyard bucket AND supply the day counts of the
           # lifecycle rules that expire them, exactly as /var/tmp/graveyard's
@@ -99,20 +123,22 @@
               fi
 
               # ── buckets ───────────────────────────────────────────────────
-              for bucket in ${cfg.bucket} ${cfg.graveyardBucket}; do
+              for bucket in ${lib.concatStringsSep " " allBuckets}; do
                 if ! ${garageCli} bucket list | grep -qw "$bucket"; then
                   ${garageCli} bucket create "$bucket"
                 fi
               done
 
               # ── website access ────────────────────────────────────────────
-              # Only the durable bucket is reachable on the browser path. The
+              # Only the durable buckets are reachable on the browser path. The
               # graveyard is deliberately NOT a website: with website access
               # denied, Garage answers 404 on the web endpoint no matter what
               # Host header a request carries, so the private bucket is
               # unreachable from the browser plane by construction rather than
               # by a rule someone maintains.
-              ${garageCli} bucket website --allow -i index.html ${cfg.bucket}
+              for bucket in ${lib.concatStringsSep " " websiteBuckets}; do
+                ${garageCli} bucket website --allow -i index.html "$bucket"
+              done
 
               # ── lifecycle ─────────────────────────────────────────────────
               # Lifecycle is an S3-API operation, not a Garage admin one, so it
@@ -123,10 +149,10 @@
               if ! ${garageCli} key list | grep -qw "${cfg.bootstrapKeyName}"; then
                 ${garageCli} key create ${cfg.bootstrapKeyName} >/dev/null
               fi
-              ${garageCli} bucket allow --read --write --owner \
-                ${cfg.graveyardBucket} --key ${cfg.bootstrapKeyName} >/dev/null
-              ${garageCli} bucket allow --read --write --owner \
-                ${cfg.bucket} --key ${cfg.bootstrapKeyName} >/dev/null
+              for bucket in ${lib.concatStringsSep " " allBuckets}; do
+                ${garageCli} bucket allow --read --write --owner \
+                  "$bucket" --key ${cfg.bootstrapKeyName} >/dev/null
+              done
 
               key_info=$(${garageCli} key info --show-secret ${cfg.bootstrapKeyName})
               AWS_ACCESS_KEY_ID=$(echo "$key_info" | sed -n 's/^Key ID: *//p')
@@ -135,7 +161,7 @@
               export AWS_DEFAULT_REGION=${cfg.region}
               export AWS_EC2_METADATA_DISABLED=true
 
-              for bucket in ${cfg.bucket} ${cfg.graveyardBucket}; do
+              for bucket in ${lib.concatStringsSep " " allBuckets}; do
                 aws --endpoint-url http://127.0.0.1:${toString cfg.ports.s3} \
                   s3api put-bucket-lifecycle-configuration \
                   --bucket "$bucket" \
@@ -143,14 +169,17 @@
               done
 
               # ── the lister's key ──────────────────────────────────────────
-              # doc/LISTER.md, "the key".
+              # doc/LISTER.md, "the key". Read-only on every website bucket,
+              # and never on the graveyard.
               if ! ${garageCli} key list | grep -qw "${cfg.listerKeyName}"; then
                 ${garageCli} key create ${cfg.listerKeyName} >/dev/null
               fi
-              ${garageCli} bucket allow --read \
-                ${cfg.bucket} --key ${cfg.listerKeyName} >/dev/null
-              ${garageCli} bucket deny --write --owner \
-                ${cfg.bucket} --key ${cfg.listerKeyName} >/dev/null 2>&1 || true
+              for bucket in ${lib.concatStringsSep " " websiteBuckets}; do
+                ${garageCli} bucket allow --read \
+                  "$bucket" --key ${cfg.listerKeyName} >/dev/null
+                ${garageCli} bucket deny --write --owner \
+                  "$bucket" --key ${cfg.listerKeyName} >/dev/null 2>&1 || true
+              done
 
               lister_info=$(${garageCli} key info --show-secret ${cfg.listerKeyName})
               umask 077
@@ -214,6 +243,19 @@
                 signed requests. Its `1d/` `7d/` `30d/` prefixes expire on their
                 own names, matching /var/tmp/graveyard so the estate has one
                 vocabulary for expiry rather than two.
+              '';
+            };
+
+            shareBucket = lib.mkOption {
+              type = lib.types.str;
+              default = "share";
+              description = ''
+                Bucket for things deliberately shown to someone outside the
+                household. See doc/SHARING.md.
+
+                Same constraint as `bucket`: Garage's web endpoint resolves the
+                bucket from the Host header, so serving share.<domain> REQUIRES
+                a bucket named `share`.
               '';
             };
 
@@ -381,12 +423,13 @@
             ];
 
             systemd.services.gluck-files-lister = {
-              description = "Directory listing for the ${cfg.bucket} bucket";
+              description = "Directory listing for the ${lib.concatStringsSep " and " websiteBuckets} buckets";
               after = [ "gluck-files-bootstrap.service" ];
               requires = [ "gluck-files-bootstrap.service" ];
               wantedBy = [ "multi-user.target" ];
               environment = {
-                LISTER_BUCKET = cfg.bucket;
+                LISTER_BUCKETS = lib.concatStringsSep "," websiteBuckets;
+                LISTER_ROOT_DOMAIN = ".${baseDomain}";
                 LISTER_ENDPOINT = "http://127.0.0.1:${toString cfg.ports.s3}";
                 LISTER_REGION = cfg.region;
                 LISTER_TEMPLATE = listerTemplate;
@@ -400,6 +443,10 @@
                 Group = cfg.listerUser;
                 Restart = "on-failure";
                 RestartSec = 5;
+                # Spain is the house router on a single unbacked NVMe. No
+                # service gets to take the box down by growing.
+                MemoryMax = "256M";
+                CPUQuota = "50%";
                 NoNewPrivileges = true;
                 PrivateTmp = true;
                 PrivateDevices = true;
@@ -460,19 +507,20 @@
               requireAuth = true;
               requiredGroups = [ "files-admin" ];
               proxyTo = cfg.ports.web;
-              extraConfig = ''
-                @bearer header Authorization Bearer*
-                respond @bearer 403
-                header Cache-Control "no-store"
+              extraConfig = browserPathConfig;
+            };
 
-                # doc/LISTER.md, "the split". A trailing slash is a directory
-                # and goes to the lister; everything else is an object and
-                # streams from Garage through the terminal reverse_proxy.
-                @dir path_regexp dir (/|^)$
-                handle @dir {
-                  reverse_proxy localhost:${toString cfg.listerPort}
-                }
-              '';
+            # ── the share path ────────────────────────────────────────────
+            # doc/SHARING.md. A second website bucket on its own hostname, so a
+            # grant to `share` is not a grant to `files`. Same browser-path
+            # config as files.<domain>, which is the point: Garage's web
+            # endpoint verifies nothing here either, so the bearer bypass must
+            # stay dead on this hostname too.
+            services.kelliher-web.sites.gluck-share = {
+              subdomains = [ cfg.shareBucket ];
+              requireAuth = true;
+              proxyTo = cfg.ports.web;
+              extraConfig = browserPathConfig;
             };
 
             # ── the S3 path ───────────────────────────────────────────────
@@ -519,6 +567,13 @@
                   "gluck-files: Garage's web endpoint resolves buckets from the Host header "
                   + "against a root_domain, so kelliher-web.baseDomains must be non-empty.";
               }
+              {
+                assertion = lib.length (lib.unique allBuckets) == lib.length allBuckets;
+                message =
+                  "gluck-files: bucket, shareBucket and graveyardBucket must be distinct. "
+                  + "Aliasing the graveyard onto a website bucket would make it browsable, "
+                  + "which is the boundary doc/AUTH.md relies on.";
+              }
             ];
           };
         };
@@ -527,6 +582,24 @@
     {
       nixosModules.default = nixosModule;
       nixosModules.gluck-files = nixosModule;
+
+      # The Host -> bucket allowlist is the only thing standing between a
+      # forged Host header and the graveyard, so it is tested rather than
+      # reasoned about. `nix flake check`.
+      checks = forAllSystems (system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+          py = pkgs.python3.withPackages (ps: with ps; [ flask waitress boto3 markupsafe ]);
+        in {
+          lister-bucket-for = pkgs.runCommand "lister-bucket-for" { } ''
+            # pipefail is load-bearing: without it the pipeline reports tee's
+            # exit status and a failing test builds green.
+            set -o pipefail
+            cp ${./lister/lister.py} lister.py
+            cp ${./lister/test_lister.py} test_lister.py
+            ${py}/bin/python3 test_lister.py 2>&1 | tee $out
+          '';
+        });
 
       # doc/CLI.md
       packages = forAllSystems (system:

@@ -43,13 +43,39 @@ Consequences worth keeping:
 
 ## Auth
 
-Behind Authelia exactly as the rest of the site, `requireAuth = true`,
-`requiredGroups = [ "files-admin" ]`.
+Behind Authelia exactly as the rest of the site, `requireAuth = true`.
 
 **`bearerBypass` stays off.** The lister does not verify JWTs, so switching the
 bypass on would put an unauthenticated path in front of it. That is the
 September 5 incident. The site's `respond @bearer 403` makes it ineffective
 rather than merely inadvisable.
+
+## Which bucket
+
+One lister serves every website hostname. It resolves the bucket from the `Host`
+header exactly as Garage's web endpoint does, against the same `root_domain`,
+then checks `LISTER_BUCKETS` as an **allowlist**.
+
+The allowlist is the security property, not the resolution. Without it,
+`graveyard.kelliher.info` names a bucket that is deliberately not a website, and
+the browser plane acquires a door into the private one. Covered by
+`lister/test_lister.py`, wired into `nix flake check`, with a negative control
+run: deleting the allowlist check makes the graveyard case fail.
+
+That Caddy passes the original `Host` upstream is proven rather than assumed, by
+the running system: `files.kelliher.info` already serves objects through
+`reverse_proxy localhost:3902`, and Garage resolves its bucket from `Host`.
+
+| `Host` | bucket |
+|---|---|
+| `files.kelliher.info` | `files` |
+| `share.kelliher.info` | `share` |
+| `share.kelliher.info:8780` | `share` |
+| `graveyard.kelliher.info` | none, 404 |
+| `a.share.kelliher.info` | none, 404 |
+
+An unresolvable host gets **404**, not 403: the same no-existence-leak rule
+`kstack` states for unreadable items.
 
 ## The key
 
@@ -58,7 +84,7 @@ key for lifecycle rules. No human, no sops entry, no secret in a transcript.
 
 | property | value |
 |---|---|
-| grant | `--read` on `files` only |
+| grant | `--read` on every website bucket (`files`, `share`) |
 | graveyard | never granted |
 | file | `/var/lib/gluck-files-lister/credentials`, mode 0440 |
 | owner | `garage`, group `gluck-files-lister` |

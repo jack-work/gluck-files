@@ -3,18 +3,19 @@
 Object storage on spain, backed by [Garage](https://garagehq.deuxfleurs.fr/)
 (S3-compatible), fronted by kelliher-web.
 
-Two hostnames, one daemon:
+Three hostnames, one daemon:
 
 | | |
 |---|---|
 | `s3.kelliher.info` | The S3 API. Authenticated by **SigV4**, no Authelia. Uploads, presigning, lifecycle. |
+| `files.kelliher.info` | The browser path. Authenticated by **Authelia**. Read-only, the household's own files. |
+| `share.kelliher.info` | The browser path for things shown to someone **outside** the household. See [`doc/SHARING.md`](./doc/SHARING.md). |
 
-Naming, stated once: **buckets carry the real names** (`files`,
-`graveyard`). The `s3.` subdomain names a *protocol door*, not a thing —
+Naming, stated once: **buckets carry the real names** (`files`, `share`,
+`graveyard`). The `s3.` subdomain names a *protocol door*, not a thing:
 it exists because the API and the website need different authentication,
 and the `s3://` in every command is awscli's URI scheme, which nobody
 gets to rename.
-| `files.kelliher.info` | The browser path. Authenticated by **Authelia** + the `files-admin` group. Read-only, links only. |
 
 Why it is shaped this way, and the bug it replaces, is in
 [`doc/AUTH.md`](./doc/AUTH.md). Read that before changing anything about auth.
@@ -24,11 +25,12 @@ Why it is shaped this way, and the bug it replaces, is in
 | Bucket | Reachable from | Retention |
 |---|---|---|
 | `files` | both hostnames | forever, until you delete it |
+| `share` | `share.kelliher.info` + `s3.` | forever, unless put under a dated prefix. See [`doc/SHARING.md`](./doc/SHARING.md) |
 | `graveyard` | `s3.` only (private, never a website) | `1d/` `7d/` `30d/` prefixes expire on their names |
 
 `files` is not a free choice: Garage's web endpoint resolves the bucket from
 the `Host` header, so `files.kelliher.info` **requires** a bucket called
-`files`.
+`files`. The same coupling names `share`.
 
 The graveyard mirrors `/var/tmp/graveyard` on the same box on purpose. One
 vocabulary for expiry across the estate: `7d/` means seven days in the bucket
@@ -128,11 +130,11 @@ hush files s3 cp draft.pdf s3://graveyard/7d/
 
 `files.kelliher.info/<path>` serves an object, behind Authelia.
 
-**There is no directory listing.** Garage's web endpoint serves an index
-document or 404; it has no autoindex, unlike the `file_server browse` this
-service used to run. Links are the interface. If you want an index at a prefix,
-put one there: an `index.html` uploaded to a prefix is served for `/`, which
-is the supported way to get browsing back and costs nothing to add later.
+**Directory listings are computed per request** by the lister, which serves any
+path ending in `/`. Garage itself has no autoindex: its web endpoint serves an
+index document or a 404. See [`doc/LISTER.md`](./doc/LISTER.md) for the split and
+why a generated `index.html` was refused. An `index.html` uploaded to a prefix
+still wins for that prefix, since Garage handles it before the lister is asked.
 
 ## Operating
 

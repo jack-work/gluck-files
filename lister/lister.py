@@ -8,10 +8,13 @@ from datetime import timezone
 import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
-from flask import Flask, Response, abort, render_template_string
+from flask import Flask, Response, abort, render_template_string, request
 from markupsafe import escape
 
-BUCKET = os.environ.get("LISTER_BUCKET", "files")
+BUCKETS = frozenset(
+    b for b in os.environ.get("LISTER_BUCKETS", "files").replace(",", " ").split() if b
+)
+ROOT_DOMAIN = os.environ.get("LISTER_ROOT_DOMAIN", "").lower()
 ENDPOINT = os.environ.get("LISTER_ENDPOINT", "http://127.0.0.1:3900")
 REGION = os.environ.get("LISTER_REGION", "spain")
 TEMPLATE = os.environ["LISTER_TEMPLATE"]
@@ -66,12 +69,31 @@ def parent_of(prefix):
     return "/" + "".join(p + "/" for p in parts[:-1])
 
 
-def listing(prefix):
+def bucket_for(host):
+    """Resolve the bucket from the Host header, as Garage's web endpoint does.
+
+    Host minus ROOT_DOMAIN is the bucket name, and it must appear in the
+    allowlist. The allowlist is what makes a forged Host header uninteresting:
+    without it, `graveyard.kelliher.info` would name a bucket that is
+    deliberately not a website.
+    """
+    h = (host or "").split(":")[0].lower().rstrip(".")
+    if not ROOT_DOMAIN:
+        return next(iter(BUCKETS)) if len(BUCKETS) == 1 else None
+    if not h.endswith(ROOT_DOMAIN):
+        return None
+    name = h[: -len(ROOT_DOMAIN)]
+    if not name or "." in name or name not in BUCKETS:
+        return None
+    return name
+
+
+def listing(bucket, prefix):
     dirs, files, truncated, token = [], [], False, None
     shown = 0
     while True:
         kw = {
-            "Bucket": BUCKET,
+            "Bucket": bucket,
             "Prefix": prefix,
             "Delimiter": "/",
             "MaxKeys": 1000,
@@ -114,8 +136,8 @@ def listing(prefix):
     return dirs, files, truncated, shown
 
 
-def render(prefix):
-    dirs, files, truncated, shown = listing(prefix)
+def render(bucket, prefix):
+    dirs, files, truncated, shown = listing(bucket, prefix)
     total = sum(f["bytes"] for f in files)
     bits = []
     if dirs:
@@ -126,18 +148,18 @@ def render(prefix):
     tally = " \u00b7 ".join(bits) if bits else "empty"
 
     name = [p for p in prefix.split("/") if p]
-    heading = name[-1] if name else "Files"
+    heading = name[-1] if name else bucket
 
     return render_template_string(
         PAGE,
-        title=("/" + prefix if prefix else "files") + " \u00b7 kelliher.info",
+        title=("/" + prefix if prefix else bucket) + " \u00b7 kelliher.info",
         heading=heading,
         crumbs=crumbs_for(prefix),
         parent=parent_of(prefix),
         dirs=dirs,
         files=files,
         tally=tally,
-        bucket=BUCKET,
+        bucket=bucket,
         truncated=truncated,
         shown=shown,
     )
@@ -145,14 +167,20 @@ def render(prefix):
 
 @app.route("/")
 def root():
-    return render("")
+    bucket = bucket_for(request.host)
+    if bucket is None:
+        abort(404)
+    return render(bucket, "")
 
 
 @app.route("/<path:prefix>/")
 def sub(prefix):
+    bucket = bucket_for(request.host)
+    if bucket is None:
+        abort(404)
     if ".." in prefix.split("/"):
         abort(400)
-    return render(prefix.lstrip("/") + "/")
+    return render(bucket, prefix.lstrip("/") + "/")
 
 
 @app.route("/healthz")
