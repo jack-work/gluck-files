@@ -148,5 +148,36 @@ hush files s3 cp thing.pdf s3://share/dad/
 ssh spain@spain 'sudo garage bucket info share'
 ```
 
-There is no separate key. `share` is granted to the same human keys and to the
-lister, read-only, by the bootstrap unit.
+### Human keys are granted by hand, and the bootstrap will not do it for you
+
+The bootstrap unit grants only the two keys it mints itself: `gluck-files-bootstrap`
+(RWO, for lifecycle) and `files-lister` (R). **It does not grant any human key**,
+and it should not: hardcoding a person's key name into the module would put
+identity in the wrong repo.
+
+So a new bucket starts unreachable from your laptop, and the first upload fails
+with a message that reads like a bug:
+
+```
+AccessDenied ... CreateMultipartUpload: Forbidden: Operation is not allowed for this key.
+```
+
+That is the correct response to an ungranted key. The fix is one deliberate
+command:
+
+```bash
+ssh spain@spain 'sudo garage bucket allow --read --write share --key <your key name>'
+```
+
+**The key `hush files` actually uses is named `cheroot-laptop`, not
+`jack-laptop`.** Two keys named `jack-laptop` exist in Garage with no grants on
+any bucket; they are orphans. Check before granting, because granting the wrong
+one produces the same `AccessDenied` and looks like the grant failed:
+
+```bash
+ssh spain@spain 'sudo garage bucket info files'   # read the key that already works
+```
+
+This section exists because the first draft of this document asserted that the
+bootstrap granted human keys. It does not. The claim survived review and died on
+the first upload.
