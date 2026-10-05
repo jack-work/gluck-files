@@ -147,9 +147,7 @@
               # Host header a request carries, so the private bucket is
               # unreachable from the browser plane by construction rather than
               # by a rule someone maintains.
-              for bucket in ${lib.concatStringsSep " " websiteBuckets}; do
-                ${garageCli} bucket website --allow -i index.html "$bucket"
-              done
+              ${garageCli} bucket website --allow -i index.html ${cfg.bucket}
 
               # ── lifecycle ─────────────────────────────────────────────────
               # Lifecycle is an S3-API operation, not a Garage admin one, so it
@@ -185,12 +183,10 @@
               if ! ${garageCli} key list | grep -qw "${cfg.listerKeyName}"; then
                 ${garageCli} key create ${cfg.listerKeyName} >/dev/null
               fi
-              for bucket in ${lib.concatStringsSep " " websiteBuckets}; do
-                ${garageCli} bucket allow --read \
-                  "$bucket" --key ${cfg.listerKeyName} >/dev/null
-                ${garageCli} bucket deny --write --owner \
-                  "$bucket" --key ${cfg.listerKeyName} >/dev/null 2>&1 || true
-              done
+              ${garageCli} bucket allow --read \
+                ${cfg.bucket} --key ${cfg.listerKeyName} >/dev/null
+              ${garageCli} bucket deny --write --owner \
+                ${cfg.bucket} --key ${cfg.listerKeyName} >/dev/null 2>&1 || true
 
               lister_info=$(${garageCli} key info --show-secret ${cfg.listerKeyName})
               umask 077
