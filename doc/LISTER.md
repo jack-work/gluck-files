@@ -1,6 +1,6 @@
 ---
 name: LISTER
-description: How files.kelliher.info gets a directory listing on top of Garage, which has none. Read before changing the Caddy split, the lister's key, or reaching for a generated index.html.
+description: How files.kelliher.info gets a directory listing on top of Garage, which has none, and how the bucket is resolved from the Host header. Read before changing the lister's key or reaching for a generated index.html. Access control itself lives in doc/ACL.md.
 ---
 
 # The lister
@@ -16,30 +16,23 @@ It is accurate when written and wrong the next time anything is uploaded, and
 the failure is silent: a page that omits a new object or links to a deleted one,
 with no error anywhere. Listing at request time cannot drift.
 
-## The split
+## There is no longer a split
 
-Caddy routes on the trailing slash, inside the site's existing `route` block.
+This document used to describe Caddy routing trailing-slash requests to the
+lister and everything else straight to Garage. **That split is gone.** Every
+request to `files.kelliher.info` now goes to the gateway, because a policy
+checked only on directory requests would govern the listing and nothing else.
 
-| request | handled by |
-|---|---|
-| `/` or any path ending `/` | lister, port 9099 |
-| everything else | Garage web, port 3902 |
-
-```
-@dir path_regexp dir (/|^)$
-handle @dir {
-  reverse_proxy localhost:9099
-}
-```
-
-`extraConfig` is emitted **before** the terminal `reverse_proxy`, so a
-non-matching request falls through to Garage untouched.
+See [`ACL.md`](./ACL.md) for what the gateway decides and how. What remains here
+is listing mechanics and the bucket's own key.
 
 Consequences worth keeping:
 
-- No bytes pass through the lister. Large objects stream from Garage.
-- File URLs stay `files.kelliher.info/<key>`, unchanged.
-- The lister never proxies, never redirects to storage, holds no object data.
+- Directory listings are computed at request time, so they cannot drift. A
+  generated `index.html` is accurate when written and wrong the next time
+  anything is uploaded, and the failure is silent.
+- No object bytes pass through python. The gateway redirects to a short-lived
+  presigned URL and Garage serves the data.
 
 ## Auth
 
@@ -52,7 +45,7 @@ rather than merely inadvisable.
 
 ## Which bucket
 
-One lister serves every website hostname. It resolves the bucket from the `Host`
+The gateway serves every website hostname. It resolves the bucket from the `Host`
 header exactly as Garage's web endpoint does, against the same `root_domain`,
 then checks `LISTER_BUCKETS` as an **allowlist**.
 
@@ -62,17 +55,24 @@ the browser plane acquires a door into the private one. Covered by
 `lister/test_lister.py`, wired into `nix flake check`, with a negative control
 run: deleting the allowlist check makes the graveyard case fail.
 
-That Caddy passes the original `Host` upstream is proven rather than assumed, by
-the running system: `files.kelliher.info` already serves objects through
-`reverse_proxy localhost:3902`, and Garage resolves its bucket from `Host`.
+That Caddy passes the original `Host` upstream is proven rather than assumed. It
+was demonstrated directly against the running system, back when this hostname
+proxied to Garage's web endpoint and Garage resolved its own bucket from `Host`:
+
+```
+Host: files.kelliher.info  /wfh/Rental_Agreement.pdf -> 200
+Host: localhost            /wfh/Rental_Agreement.pdf -> 404
+```
+
+The route now terminates at the gateway instead, but the `Host` behaviour it
+relies on is the same and was measured, not inferred.
 
 | `Host` | bucket |
 |---|---|
 | `files.kelliher.info` | `files` |
-| `share.kelliher.info` | `share` |
-| `share.kelliher.info:8780` | `share` |
+| `files.kelliher.info:8780` | `files` |
 | `graveyard.kelliher.info` | none, 404 |
-| `a.share.kelliher.info` | none, 404 |
+| `a.files.kelliher.info` | none, 404 |
 
 An unresolvable host gets **404**, not 403: the same no-existence-leak rule
 `kstack` states for unreadable items.
@@ -84,7 +84,7 @@ key for lifecycle rules. No human, no sops entry, no secret in a transcript.
 
 | property | value |
 |---|---|
-| grant | `--read` on every website bucket (`files`, `share`) |
+| grant | `--read` on `files` |
 | graveyard | never granted |
 | file | `/var/lib/gluck-files-lister/credentials`, mode 0440 |
 | owner | `garage`, group `gluck-files-lister` |

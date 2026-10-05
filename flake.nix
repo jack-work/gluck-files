@@ -18,26 +18,44 @@
 
           baseDomain = lib.head config.services.kelliher-web.baseDomains;
 
-          # Buckets reachable on the browser path. The graveyard is not one of
-          # them, and that is the boundary doc/AUTH.md relies on.
-          websiteBuckets = [ cfg.bucket cfg.shareBucket ];
+          # The lister now imports acl.py, so the entrypoint must reach the
+          # store as a DIRECTORY. Passing a single .py file copies that file
+          # alone and the unit dies at startup on ModuleNotFoundError. That
+          # happened on this estate once already.
+          listerSrc = pkgs.runCommand "gluck-files-lister-src" { } ''
+            mkdir -p $out
+            cp ${./lister/acl.py}    $out/acl.py
+            cp ${./lister/lister.py} $out/lister.py
+            cp ${./lister/aclctl.py} $out/aclctl.py
+          '';
+
+          listerPython = pkgs.python3.withPackages (ps: with ps; [
+            flask
+            waitress
+            boto3
+            markupsafe
+          ]);
+
+          # The admin's only way to change an ACL. Authority is ssh to spain.
+          aclCtl = pkgs.writeShellApplication {
+            name = "gluck-files-acl";
+            text = ''
+              exec ${listerPython}/bin/python3 ${listerSrc}/aclctl.py \
+                --db ${cfg.aclDatabase} "$@"
+            '';
+          };
+
+          websiteBuckets = [ cfg.bucket ];
           allBuckets = websiteBuckets ++ [ cfg.graveyardBucket ];
 
-          # Shared by every hostname fronting Garage's web endpoint. Declared
-          # once so the two sites cannot drift: doc/AUTH.md's `respond @bearer
-          # 403` is a security property, not a per-site preference.
+          # Every request to the browser hostname goes to the gateway. There is
+          # no longer a path that reaches Garage's web endpoint directly, which
+          # is the whole point: a policy checked only on directory requests
+          # would govern the listing and nothing else.
           browserPathConfig = ''
             @bearer header Authorization Bearer*
             respond @bearer 403
             header Cache-Control "no-store"
-
-            # doc/LISTER.md, "the split". A trailing slash is a directory
-            # and goes to the lister; everything else is an object and
-            # streams from Garage through the terminal reverse_proxy.
-            @dir path_regexp dir (/|^)$
-            handle @dir {
-              reverse_proxy localhost:${toString cfg.listerPort}
-            }
           '';
 
           # The retention vocabulary, declared ONCE. These strings name the
@@ -79,13 +97,6 @@
               ${./lister/template.html.in} -o $out
             zanni-check $out
           '';
-
-          listerPython = pkgs.python3.withPackages (ps: with ps; [
-            flask
-            waitress
-            boto3
-            markupsafe
-          ]);
 
           bootstrap = pkgs.writeShellApplication {
             name = "gluck-files-bootstrap";
@@ -246,18 +257,6 @@
               '';
             };
 
-            shareBucket = lib.mkOption {
-              type = lib.types.str;
-              default = "share";
-              description = ''
-                Bucket for things deliberately shown to someone outside the
-                household. See doc/SHARING.md.
-
-                Same constraint as `bucket`: Garage's web endpoint resolves the
-                bucket from the Host header, so serving share.<domain> REQUIRES
-                a bucket named `share`.
-              '';
-            };
 
             windows = lib.mkOption {
               type = lib.types.listOf lib.types.str;
@@ -298,6 +297,43 @@
                 Name of the key the bootstrap unit mints for itself to apply
                 lifecycle rules. Distinct from any human's key so that
                 revoking a laptop's access never disarms retention.
+              '';
+            };
+
+            aclDatabase = lib.mkOption {
+              type = lib.types.str;
+              default = "/var/lib/gluck-files-acl/acl.db";
+              description = ''
+                The per-path ACL table. Garage cannot express a prefix grant, so
+                this is where read/list/write on a path is decided. See
+                doc/ACL.md.
+
+                Written only by `gluck-files-acl`, run as root over ssh. There
+                is no network-facing way to change a grant.
+              '';
+            };
+
+            presignSeconds = lib.mkOption {
+              type = lib.types.int;
+              default = 120;
+              description = ''
+                Lifetime of the presigned URL the gateway redirects to.
+
+                That URL is a bearer capability until it expires, so this is
+                minutes rather than the seven days SigV4 would permit. The
+                gateway decides access; the presign only delivers bytes.
+              '';
+            };
+
+            adminGroup = lib.mkOption {
+              type = lib.types.str;
+              default = "files-admin";
+              description = ''
+                Group seeded with read/list/write on the root of the bucket when
+                the ACL database is first created.
+
+                Admin is a GRANT, not a branch in the request path, so the admin
+                case is exercised by exactly the checks everyone else gets.
               '';
             };
 
@@ -411,6 +447,9 @@
               Group = "garage";
             };
 
+            # The admin's ACL tool, on root's PATH. doc/ACL.md.
+            environment.systemPackages = [ aclCtl ];
+
             users.users.${cfg.listerUser} = {
               isSystemUser = true;
               group = cfg.listerUser;
@@ -423,7 +462,7 @@
             ];
 
             systemd.services.gluck-files-lister = {
-              description = "Directory listing for the ${lib.concatStringsSep " and " websiteBuckets} buckets";
+              description = "ACL gateway for the ${cfg.bucket} bucket";
               after = [ "gluck-files-bootstrap.service" ];
               requires = [ "gluck-files-bootstrap.service" ];
               wantedBy = [ "multi-user.target" ];
@@ -434,10 +473,18 @@
                 LISTER_REGION = cfg.region;
                 LISTER_TEMPLATE = listerTemplate;
                 LISTER_PORT = toString cfg.listerPort;
+                # Presigned URLs must be followable from a browser, so they are
+                # signed against the PUBLIC S3 door rather than loopback.
+                LISTER_PUBLIC_ENDPOINT = "https://s3.${baseDomain}";
+                LISTER_ACL_DB = cfg.aclDatabase;
+                LISTER_PRESIGN_SECONDS = toString cfg.presignSeconds;
+                LISTER_ADMIN_GROUP = cfg.adminGroup;
                 AWS_EC2_METADATA_DISABLED = "true";
               };
               serviceConfig = {
-                ExecStart = "${listerPython}/bin/python3 ${./lister/lister.py}";
+                ExecStart = "${listerPython}/bin/python3 ${listerSrc}/lister.py";
+                StateDirectory = "gluck-files-acl";
+                StateDirectoryMode = "0750";
                 EnvironmentFile = cfg.listerCredentialsFile;
                 User = cfg.listerUser;
                 Group = cfg.listerUser;
@@ -506,22 +553,14 @@
               subdomains = [ "files" ];
               requireAuth = true;
               requiredGroups = [ "files-admin" ];
-              proxyTo = cfg.ports.web;
+              # THE GATEWAY, not Garage. Garage's web endpoint on
+              # cfg.ports.web is no longer reachable from any hostname: every
+              # request is decided by the ACL table first, and bytes arrive via
+              # a short-lived presigned URL on the S3 door instead.
+              proxyTo = cfg.listerPort;
               extraConfig = browserPathConfig;
             };
 
-            # ── the share path ────────────────────────────────────────────
-            # doc/SHARING.md. A second website bucket on its own hostname, so a
-            # grant to `share` is not a grant to `files`. Same browser-path
-            # config as files.<domain>, which is the point: Garage's web
-            # endpoint verifies nothing here either, so the bearer bypass must
-            # stay dead on this hostname too.
-            services.kelliher-web.sites.gluck-share = {
-              subdomains = [ cfg.shareBucket ];
-              requireAuth = true;
-              proxyTo = cfg.ports.web;
-              extraConfig = browserPathConfig;
-            };
 
             # ── the S3 path ───────────────────────────────────────────────
             # requireAuth = false, deliberately, and this is the point of the
@@ -570,9 +609,9 @@
               {
                 assertion = lib.length (lib.unique allBuckets) == lib.length allBuckets;
                 message =
-                  "gluck-files: bucket, shareBucket and graveyardBucket must be distinct. "
-                  + "Aliasing the graveyard onto a website bucket would make it browsable, "
-                  + "which is the boundary doc/AUTH.md relies on.";
+                  "gluck-files: bucket and graveyardBucket must be distinct. "
+                  + "Aliasing the graveyard onto the website bucket would make it "
+                  + "browsable, which is the boundary doc/AUTH.md relies on.";
               }
             ];
           };
@@ -590,14 +629,45 @@
         let
           pkgs = nixpkgs.legacyPackages.${system};
           py = pkgs.python3.withPackages (ps: with ps; [ flask waitress boto3 markupsafe ]);
-        in {
-          lister-bucket-for = pkgs.runCommand "lister-bucket-for" { } ''
+          suite = name: file: pkgs.runCommand "gluck-files-${name}" { } ''
             # pipefail is load-bearing: without it the pipeline reports tee's
             # exit status and a failing test builds green.
             set -o pipefail
-            cp ${./lister/lister.py} lister.py
-            cp ${./lister/test_lister.py} test_lister.py
-            ${py}/bin/python3 test_lister.py 2>&1 | tee $out
+            cp ${./lister}/*.py .
+            export LISTER_ACL_DB=$PWD/acl-test.db
+            ${py}/bin/python3 ${file} 2>&1 | tee $out
+          '';
+        in {
+          acl = suite "acl" "test_acl.py";
+          gateway = suite "gateway" "test_gateway.py";
+          bucket-for = suite "bucket-for" "test_lister.py";
+
+          # What the module SHIPS, not what the tests assemble. The suites copy
+          # every .py file into one directory; the unit executes a store path
+          # built from an explicit list. Those disagreed once, in portero, and
+          # the units died on ModuleNotFoundError while every suite was green.
+          packaging = pkgs.runCommand "gluck-files-packaging" { } ''
+            set -o pipefail
+            SRC=${pkgs.runCommand "gluck-files-lister-src-check" { } ''
+              mkdir -p $out
+              cp ${./lister/acl.py}    $out/acl.py
+              cp ${./lister/lister.py} $out/lister.py
+              cp ${./lister/aclctl.py} $out/aclctl.py
+            ''}
+            for m in acl.py lister.py aclctl.py; do
+              test -f "$SRC/$m" || { echo "MISSING from shipped tree: $m"; exit 1; }
+            done
+            if ls "$SRC" | grep -q '^test_'; then
+              echo "test files leaked into the runtime closure"; exit 1
+            fi
+            tpl=$(mktemp); echo '<h1>{{ heading }}</h1>' > "$tpl"
+            LISTER_TEMPLATE=$tpl LISTER_ACL_DB=$PWD/acl-check.db \
+            AWS_ACCESS_KEY_ID=t AWS_SECRET_ACCESS_KEY=t AWS_EC2_METADATA_DISABLED=true \
+            ${py}/bin/python3 -c "
+import sys; sys.path.insert(0, '$SRC')
+import lister, acl, aclctl
+print('gateway, acl and the admin CLI all import from the shipped tree')
+" 2>&1 | tee $out
           '';
         });
 

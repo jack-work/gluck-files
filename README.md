@@ -3,15 +3,14 @@
 Object storage on spain, backed by [Garage](https://garagehq.deuxfleurs.fr/)
 (S3-compatible), fronted by kelliher-web.
 
-Three hostnames, one daemon:
+Two hostnames, one daemon:
 
 | | |
 |---|---|
 | `s3.kelliher.info` | The S3 API. Authenticated by **SigV4**, no Authelia. Uploads, presigning, lifecycle. |
-| `files.kelliher.info` | The browser path. Authenticated by **Authelia**. Read-only, the household's own files. |
-| `share.kelliher.info` | The browser path for things shown to someone **outside** the household. See [`doc/SHARING.md`](./doc/SHARING.md). |
+| `files.kelliher.info` | The browser path. Authelia, then **per-path ACLs**. Every request goes through the gateway; see [`doc/ACL.md`](./doc/ACL.md). |
 
-Naming, stated once: **buckets carry the real names** (`files`, `share`,
+Naming, stated once: **buckets carry the real names** (`files`,
 `graveyard`). The `s3.` subdomain names a *protocol door*, not a thing:
 it exists because the API and the website need different authentication,
 and the `s3://` in every command is awscli's URI scheme, which nobody
@@ -24,13 +23,12 @@ Why it is shaped this way, and the bug it replaces, is in
 
 | Bucket | Reachable from | Retention |
 |---|---|---|
-| `files` | both hostnames | forever, until you delete it |
-| `share` | `share.kelliher.info` + `s3.` | forever, unless put under a dated prefix. See [`doc/SHARING.md`](./doc/SHARING.md) |
+| `files` | both hostnames, with per-path ACLs on the browser path | forever, until you delete it |
 | `graveyard` | `s3.` only (private, never a website) | `1d/` `7d/` `30d/` prefixes expire on their names |
 
 `files` is not a free choice: Garage's web endpoint resolves the bucket from
 the `Host` header, so `files.kelliher.info` **requires** a bucket called
-`files`. The same coupling names `share`.
+`files`.
 
 The graveyard mirrors `/var/tmp/graveyard` on the same box on purpose. One
 vocabulary for expiry across the estate: `7d/` means seven days in the bucket
@@ -111,6 +109,17 @@ awscli takes the last occurrence.)
 
 ## Sharing a file with someone
 
+The usual way is now a **grant**, not a link: put the file somewhere, give the
+person read on that path, and they fetch it from `files.kelliher.info` behind
+their own login. See [`doc/ACL.md`](./doc/ACL.md).
+
+```bash
+hush files s3 cp book.pdf s3://files/dad/
+ssh spain@spain 'sudo gluck-files-acl grant dad dad/ --read --list'
+```
+
+A presigned link is still the right answer for someone with **no account**:
+
 Presign it. The link carries its own expiry, so the grant ends on a schedule
 instead of living forever in a chat history:
 
@@ -128,13 +137,17 @@ hush files s3 cp draft.pdf s3://graveyard/7d/
 
 ## Browsing
 
-`files.kelliher.info/<path>` serves an object, behind Authelia.
+`files.kelliher.info/<path>` serves an object **if your ACL permits it**, behind
+Authelia. Every request goes through the gateway: directory requests need `list`
+on the prefix, objects need `read` on the key, and anything denied is a 404 so
+the bucket's shape is not an oracle.
 
-**Directory listings are computed per request** by the lister, which serves any
-path ending in `/`. Garage itself has no autoindex: its web endpoint serves an
-index document or a 404. See [`doc/LISTER.md`](./doc/LISTER.md) for the split and
-why a generated `index.html` was refused. An `index.html` uploaded to a prefix
-still wins for that prefix, since Garage handles it before the lister is asked.
+Objects arrive as a **302 to a short-lived presigned URL**, so no bytes pass
+through Python. Directory listings are computed per request; Garage itself has no
+autoindex.
+
+See [`doc/ACL.md`](./doc/ACL.md) for the model and the admin CLI, and
+[`doc/LISTER.md`](./doc/LISTER.md) for how the bucket is resolved from `Host`.
 
 ## Operating
 
