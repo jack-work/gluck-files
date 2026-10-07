@@ -1,4 +1,22 @@
+---
+name: AUTH
+description: Why gluck-files is split across two hostnames, why s3.kelliher.info has no Authelia, and the September 5 bearer bypass hole that shaped both. Read before changing a site block or adding a service to this platform. The browser-side request path described here was superseded on 2026-10-04 by the ACL gateway; see doc/ACL.md.
+---
+
 # Why two hostnames, and why one of them has no Authelia
+
+> **Superseded in part, 2026-10-04.** The browser path no longer terminates at
+> Garage. Every request to `files.kelliher.info`, objects included, terminates at
+> the ACL gateway on `9099`, and Garage's web endpoint on `3902` is named by no
+> hostname. `doc/ACL.md` is authoritative for the request path. The reasoning
+> below about the bearer bypass, the hostname split and the bucket boundary is
+> still why this service is shaped as it is, and the September 5 incident it
+> records has not changed.
+>
+> Restoring `reverse_proxy localhost:3902` would delete per-path access control
+> silently: every holder of `site-files-access` would regain all 157 objects, and
+> no test would fail, because `gluck-files-acl check` interrogates the ACL
+> database rather than the live request path.
 
 This is the reasoning behind the auth shape of `gluck-files`. It is written
 down because the mistake it corrects was invisible for months, and because
@@ -61,7 +79,12 @@ through one hostname breaks one of them.
 | Hostname | Garage endpoint | Port | Auth |
 |---|---|---|---|
 | `s3.kelliher.info` | S3 API | 3900 | **SigV4 only.** No Authelia, deliberately. |
-| `files.kelliher.info` | web | 3902 | **Authelia only**, and the bearer bypass is explicitly closed. |
+| `files.kelliher.info` | **none, since 2026-10-04.** Caddy proxies the ACL gateway on `9099`, which holds the only Garage credential | 9099 | **Authelia only**, and the bearer bypass is explicitly closed. Then the gateway decides per path |
+
+Read live from the running Caddyfile `c4w9mjm0…` on 2026-10-07 00:36 EDT: the
+`files.kelliher.info` route strips every `Remote-*` header, runs `forward_auth`
+unconditionally, answers `403` to any bearer-shaped header, and ends at
+`reverse_proxy localhost:9099`. The string `3902` appears nowhere in that file.
 
 ### `s3.kelliher.info`: `requireAuth = false` is the correct setting
 
@@ -84,6 +107,13 @@ presigned GET                                     -> 200
 Garage's **web** endpoint is the static-website endpoint. It verifies nothing,
 by design: serving a website bucket to unsigned requests is its entire job.
 Authelia is the only gate in front of it.
+
+**Since 2026-10-04 that endpoint is not in the browser path at all.** Caddy
+proxies the ACL gateway, which decides read and list per path and then redirects
+to a presigned S3 URL with a 120 second expiry. The two paragraphs below still
+apply unchanged, because the bypass must stay closed whatever sits behind the
+proxy: the gateway does not verify JWTs either, so a bearer-shaped header would
+reach the only thing deciding access without being authenticated.
 
 So this site must **not** inherit the bearer bypass, or we would have rebuilt
 the original bug with a bucket where the file server used to be. The platform
@@ -119,6 +149,12 @@ the web endpoint for a bucket without website access, whatever `Host` header
 the request carries. So the private bucket is unreachable from the browser
 plane *by construction*, not by a rule anyone maintains. Forging the Host
 header does not reach it.
+
+**This control is still true and no longer load-bearing.** Since 2026-10-04 no
+browser traffic reaches the web endpoint, so the thing keeping `graveyard` out of
+reach is now the gateway, which serves only the `files` bucket and only paths the
+ACL table grants. The bucket flag remains a second line of defence for the day
+someone points a hostname at `3902` again.
 
 ## The generalisation, for whoever adds the next service
 
