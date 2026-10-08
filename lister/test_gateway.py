@@ -177,6 +177,19 @@ class Directories(Base):
         self.assertIn(b"dad", r.data)
         self.assertIn(b"school", r.data)
 
+    def test_a_name_carrying_markup_is_escaped(self):
+        # The page is compiled once at import rather than per request, so
+        # autoescape has to come from the environment and not from the call.
+        self.grant_dad()
+        OBJECTS["dad/<script>alert(1)</script>.pdf"] = 10
+        try:
+            r = self.get("/dad/")
+            self.assertEqual(r.status_code, 200)
+            self.assertNotIn(b"<script>", r.data)
+            self.assertIn(b"&lt;script&gt;", r.data)
+        finally:
+            del OBJECTS["dad/<script>alert(1)</script>.pdf"]
+
     def test_admin_can_read_a_private_document(self):
         L.ACL.grant("group:files-admin", "", "read", "admin")
         r = self.get("/wfh/Rental_Agreement.pdf", user="admin", groups="files-admin")

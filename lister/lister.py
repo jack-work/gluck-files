@@ -26,7 +26,7 @@ from datetime import timezone
 import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
-from flask import Flask, Response, abort, redirect, render_template_string, request
+from flask import Flask, Response, abort, redirect, request
 from markupsafe import escape
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -50,6 +50,7 @@ with open(TEMPLATE, encoding="utf-8") as fh:
     PAGE = fh.read()
 
 app = Flask(__name__)
+PAGE_TEMPLATE = app.jinja_env.from_string(PAGE)
 log = logging.getLogger("gluck-files")
 
 ACL = Acl(ACL_DB)
@@ -220,8 +221,7 @@ def render(bucket, prefix, user, groups):
     tally = " \u00b7 ".join(bits) if bits else "empty"
 
     name = [p for p in prefix.split("/") if p]
-    return render_template_string(
-        PAGE,
+    return PAGE_TEMPLATE.render(
         title=("/" + prefix if prefix else bucket) + " \u00b7 kelliher.info",
         heading=name[-1] if name else bucket,
         crumbs=crumbs_for(prefix),
