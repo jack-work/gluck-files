@@ -45,6 +45,7 @@ ACL_DB = os.environ.get("LISTER_ACL_DB", "/var/lib/gluck-files-lister/acl.db")
 # A presigned URL is a bearer capability until it expires. Minutes, not the
 # seven days SigV4 would allow.
 PRESIGN_SECONDS = int(os.environ.get("LISTER_PRESIGN_SECONDS", "120"))
+MAX_QUEUE = int(os.environ.get("LISTER_MAX_QUEUE", "8"))
 
 with open(TEMPLATE, encoding="utf-8") as fh:
     PAGE = fh.read()
@@ -240,6 +241,41 @@ def healthz():
     return Response("ok\n", mimetype="text/plain")
 
 
+class Admission:
+    def __init__(self, limit):
+        self._limit = limit
+        self._dispatcher = None
+
+    def watch(self, server):
+        self._dispatcher = server.task_dispatcher
+
+    def waiting(self):
+        dispatcher = self._dispatcher
+        if dispatcher is None:
+            return 0
+        with dispatcher.lock:
+            return len(dispatcher.queue)
+
+    def is_overloaded(self):
+        return self.waiting() > self._limit
+
+
+ADMISSION = Admission(MAX_QUEUE)
+
+
+@app.before_request
+def refuse_when_overloaded():
+    if request.path == "/healthz" or not ADMISSION.is_overloaded():
+        return None
+    log.warning("shed %s, %d waiting", request.path, ADMISSION.waiting())
+    return Response(
+        "busy\n",
+        status=503,
+        mimetype="text/plain",
+        headers={"Retry-After": "2", "Cache-Control": "no-store"},
+    )
+
+
 @app.route("/", defaults={"path": ""})
 @app.route("/<path:path>")
 def serve(path):
@@ -303,10 +339,12 @@ def upstream(err):
 
 def main():
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    from waitress import serve as waitress_serve
+    from waitress import create_server
 
     port = int(os.environ.get("LISTER_PORT", "9099"))
-    waitress_serve(app, host="127.0.0.1", port=port, threads=4, ident=None)
+    server = create_server(app, host="127.0.0.1", port=port, threads=4, ident=None)
+    ADMISSION.watch(server)
+    server.run()
 
 
 if __name__ == "__main__":

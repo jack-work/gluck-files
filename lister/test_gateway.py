@@ -213,6 +213,99 @@ class Acceptance(Base):
             self.assertEqual(self.get(p).status_code, 404, p)
 
 
+class Admission(Base):
+    """Overload sheds at the door, read from waitress's own queue.
+
+    The dispatcher here is the real one from a real server bound to an
+    ephemeral port, because a counter kept alongside the queue would be a
+    mock of the thing under test and would drift under load.
+    """
+
+    def setUp(self):
+        super().setUp()
+        from waitress import create_server
+
+        self.server = create_server(L.app, host="127.0.0.1", port=0, threads=4)
+        L.ADMISSION.watch(self.server)
+        self.grant_dad()
+
+    def tearDown(self):
+        self.server.close()
+        L.ADMISSION._dispatcher = None
+
+    def fill_queue(self, n):
+        d = self.server.task_dispatcher
+        with d.lock:
+            for _ in range(n):
+                d.queue.append(object())
+
+    def drain_queue(self):
+        d = self.server.task_dispatcher
+        with d.lock:
+            d.queue.clear()
+
+    def test_an_empty_queue_serves_normally(self):
+        self.assertEqual(self.get("/dad/").status_code, 200)
+        self.assertEqual(self.get("/dad/notes.txt").status_code, 302)
+
+    def test_a_deep_queue_sheds_with_503_and_retry_after(self):
+        self.fill_queue(L.MAX_QUEUE + 1)
+        r = self.get("/dad/")
+        self.assertEqual(r.status_code, 503)
+        self.assertEqual(r.headers["Retry-After"], "2")
+        self.assertEqual(r.headers["Cache-Control"], "no-store")
+
+    def test_healthz_is_never_shed(self):
+        self.fill_queue(L.MAX_QUEUE * 10)
+        r = self.c.get("/healthz")
+        self.assertEqual(r.status_code, 200)
+
+    def test_the_limit_is_what_decides(self):
+        # Negative control: the same queue depth serves when the limit is
+        # above it, so the test is driving the predicate and not something else.
+        self.fill_queue(L.MAX_QUEUE + 1)
+        self.assertEqual(self.get("/dad/").status_code, 503)
+        old = L.ADMISSION._limit
+        L.ADMISSION._limit = L.MAX_QUEUE * 100
+        try:
+            self.assertEqual(self.get("/dad/").status_code, 200)
+        finally:
+            L.ADMISSION._limit = old
+
+    def test_shedding_stops_when_the_queue_drains(self):
+        self.fill_queue(L.MAX_QUEUE + 1)
+        self.assertEqual(self.get("/dad/").status_code, 503)
+        self.drain_queue()
+        self.assertEqual(self.get("/dad/").status_code, 200)
+        self.assertEqual(self.get("/dad/notes.txt").status_code, 302)
+
+    def test_a_shed_reveals_nothing_about_the_path(self):
+        # 503 is not a denial, so it must not become the oracle that the
+        # 404-never-403 rule exists to deny.
+        self.fill_queue(L.MAX_QUEUE + 1)
+        granted = self.get("/dad/notes.txt")
+        denied = self.get("/wfh/Rental_Agreement.pdf")
+        absent = self.get("/dad/not-here-at-all.pdf")
+        for r in (granted, denied, absent):
+            self.assertEqual(r.status_code, 503)
+        self.assertEqual(granted.data, denied.data)
+        self.assertEqual(granted.data, absent.data)
+
+    def test_a_denial_is_still_404_when_not_overloaded(self):
+        self.assertEqual(self.get("/wfh/Rental_Agreement.pdf").status_code, 404)
+
+    def test_the_dispatcher_is_the_servers_own(self):
+        self.assertIs(L.ADMISSION._dispatcher, self.server.task_dispatcher)
+        self.assertEqual(L.ADMISSION.waiting(), 0)
+        self.fill_queue(3)
+        self.assertEqual(L.ADMISSION.waiting(), 3)
+
+    def test_no_server_means_no_shedding(self):
+        L.ADMISSION._dispatcher = None
+        self.assertEqual(L.ADMISSION.waiting(), 0)
+        self.assertEqual(self.get("/dad/").status_code, 200)
+
+
 class Host(Base):
     def test_graveyard_host_is_refused(self):
         self.grant_dad()
