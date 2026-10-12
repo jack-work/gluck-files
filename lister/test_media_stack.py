@@ -111,8 +111,8 @@ api_bind_addr = "127.0.0.1:28393"
         cls.objects = {
             'dad/movie.mp4': (cls.data, 'video/mp4'),
             'dad/audio.mp3': (cls.data[:16000], 'audio/mpeg'),
-            'dad/page.html': (b'<script>PRIVATE_ACTIVE</script>', 'text/html'),
-            'dad/image.svg': (b'<svg><script>PRIVATE_ACTIVE</script></svg>', 'image/svg+xml'),
+            'dad/page.html': (b"<script>alert('PRIVATE_ACTIVE')</script>", 'text/html'),
+            'dad/image.svg': (b"<svg xmlns='http://www.w3.org/2000/svg'><script>alert('PRIVATE_ACTIVE')</script></svg>", 'image/svg+xml'),
             'dad/fake.bin': (b'<script>PRIVATE_ACTIVE</script>', 'application/octet-stream'),
             'wfh/private.mp4': (b'PRIVATE_WFH', 'video/mp4'),
             'dadtaxes/private.mp4': (b'PRIVATE_SIBLING', 'video/mp4'),
@@ -196,7 +196,7 @@ api_bind_addr = "127.0.0.1:28393"
         self.assertEqual(status, 206)
         self.assertEqual(h['content-range'], f'bytes 6000-6999/{len(self.data)}')
         self.assertEqual(body, self.data[6000:7000])
-        self.assertEqual(h['content-disposition'], 'inline')
+        self.assertEqual(h['content-disposition'], 'attachment')
         self.safe_headers(h)
         status, h, body = self.get('/dad/movie.mp4', method='HEAD')
         self.assertEqual(status, 200)
@@ -361,6 +361,25 @@ api_bind_addr = "127.0.0.1:28393"
             self.assertIn(b' 403 ',response.split(b'\r\n',1)[0])
             self.assertIn(b'private, no-store',response)
             self.assertNotIn(self.data[:1024],response)
+
+    def test_15_viewer_is_trusted_html_not_bucket_html(self):
+        from urllib.parse import quote
+        hostile='dad/\"><script>alert(1)</script>.mp3'
+        self.s3.put_object(Bucket='files',Key=hostile,Body=b'fixture',ContentType='audio/mpeg')
+        uri='/_files/view?uri='+quote(quote('/'+hostile,safe='/'),safe='')
+        status,h,body=self.get(uri)
+        self.assertEqual(status,200)
+        self.assertNotIn('sandbox',h['content-security-policy'])
+        self.assertIn("script-src 'none'",h['content-security-policy'])
+        self.assertIn(b'&lt;script&gt;',body)
+        self.assertNotIn(b'<script>',body)
+        self.assertIn(b'<audio controls',body)
+        self.assertNotIn(b'X-Amz-',body)
+        self.denied(self.get(uri,user='bob'))
+        status,h,body=self.get('/_files/view?uri=%2Fdad%2Fpage.html')
+        self.assertEqual(status,415)
+        self.assertNotIn(b'PRIVATE_ACTIVE',body)
+        self.denied(self.get('/_files/view?uri=%2Fdad%2F..%2Fwfh%2Fprivate.mp4'))
 
     def test_98_first_auth_transport_error_has_policy(self):
         self.auth.shutdown()

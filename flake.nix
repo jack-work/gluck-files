@@ -557,6 +557,7 @@
               # a short-lived presigned URL on the S3 door instead.
               proxyTo = cfg.listerPort;
               extraConfig = browserPathConfig;
+              beforeAuthConfig = import ./lib/media-document-policy.nix;
               responseHeaders = mediaHeaders;
             };
 
@@ -641,6 +642,7 @@
           acl = suite "acl" "test_acl.py";
           gateway = suite "gateway" "test_gateway.py";
           authz = suite "authz" "test_authz.py";
+          viewer = suite "viewer" "test_viewer.py";
           bucket-for = suite "bucket-for" "test_lister.py";
 
           media-stack = pkgs.runCommand "gluck-files-media-stack" {
@@ -653,6 +655,7 @@
               }
               :28780 {
                 route {
+                  ${import ./lib/media-document-policy.nix}
                   header {
                     ${pkgs.lib.concatStringsSep "\n" (pkgs.lib.mapAttrsToList
                       (name: value: ">${name} ${builtins.toJSON value}") mediaHeaders)}

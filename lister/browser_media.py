@@ -30,16 +30,17 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE);
   const page=await context.newPage();
   const ranges=[];
   const started=Date.now();
-  page.on('request',r=>{if(r.url().includes('/dad/long.mp3'))ranges.push({seconds:(Date.now()-started)/1000,range:r.headers()['range']||null});});
+  page.on('request',r=>{if(r.url().includes('/dad/long.mp3'))ranges.push({seconds:(Date.now()-started)/1000,range:r.headers()['range']||null,hasCookie:!!r.headers()['cookie']});});
+  const replies=[];page.on('response',r=>{if(r.url().includes('/dad/long.mp3'))replies.push({seconds:(Date.now()-started)/1000,status:r.status()});});
   page.on('console',m=>console.log('browser:',m.text()));
   const cdp=await context.newCDPSession(page);
   await cdp.send('Network.enable');
   await cdp.send('Network.setCacheDisabled',{cacheDisabled:true});
   await cdp.send('Network.emulateNetworkConditions',{offline:false,latency:0,downloadThroughput:16000,uploadThroughput:1000000});
-  await page.goto('http://files.kelliher.info:28780/dad/long.mp3',{waitUntil:'domcontentloaded'});
+  await page.goto('http://files.kelliher.info:28780/_files/view?uri=%2Fdad%2Flong.mp3',{waitUntil:'domcontentloaded'});
   await page.waitForSelector('audio,video',{timeout:15000});
   console.log('native-player',await page.locator('audio,video').evaluate(m=>({tag:m.tagName,current:m.currentTime,ready:m.readyState,error:m.error&&m.error.code})));
-  await page.locator('audio,video').evaluate(m=>m.play());
+  await page.locator('audio,video').evaluate(m=>Promise.race([m.play(),new Promise((_,reject)=>setTimeout(()=>reject(Error('play did not start')),15000))]));
   if(process.env.MEDIA_SMOKE==='1') {
     await page.waitForFunction(()=>document.querySelector('audio,video').currentTime>2,{},{timeout:15000});
   } else {
@@ -48,9 +49,10 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE);
     const target=await page.locator('audio,video').evaluate(m=>Math.floor(m.duration*0.85));
     await page.locator('audio,video').evaluate((m,t)=>{m.currentTime=t;},target);
     await page.waitForFunction(t=>{let m=document.querySelector('audio,video');return m.currentTime>t+2&&!m.seeking&&m.readyState>=3;},target,{timeout:30000});
-    if(!ranges.some(r=>r.seconds>120&&r.range&&r.range!=='bytes=0-'))throw Error('seek used no fresh late Range');
+    if(!ranges.some(r=>r.seconds>120&&r.range&&r.range!=='bytes=0-'&&r.hasCookie))throw Error('seek used no fresh late Range with cookie');
+    if(!replies.some(r=>r.seconds>120&&r.status===206))throw Error('late Range did not return206');
   }
-  console.log('player-ok',await page.locator('audio,video').evaluate(m=>({time:m.currentTime,error:m.error&&m.error.code,ready:m.readyState})),JSON.stringify(ranges));
+  console.log('player-ok',await page.locator('audio,video').evaluate(m=>({time:m.currentTime,error:m.error&&m.error.code,ready:m.readyState})),JSON.stringify(ranges),JSON.stringify(replies));
  } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exit(1)});
 ''')

@@ -2,6 +2,10 @@
 ''
   @bearer header Authorization Bearer*
   respond @bearer 403
+  @files_viewer path /_files/view
+  handle @files_viewer {
+    reverse_proxy ${listerAddress}
+  }
   @files_internal path /_files/*
   respond @files_internal 404
   @files_object not path_regexp (/|^)$
@@ -41,26 +45,6 @@
             include Content-Range
           }
           respond "" {rp.status_code}
-        }
-        @files_inline {
-          header Content-Type audio/mpeg
-          header Content-Type audio/mp4
-          header Content-Type audio/aac
-          header Content-Type audio/ogg
-          header Content-Type audio/wav
-          header Content-Type audio/x-wav
-          header Content-Type audio/flac
-          header Content-Type video/mp4
-          header Content-Type video/webm
-          header Content-Type video/ogg
-          header Content-Type image/jpeg
-          header Content-Type image/png
-          header Content-Type image/gif
-          header Content-Type image/webp
-        }
-        handle_response @files_inline {
-          header >Content-Disposition inline
-          copy_response
         }
         handle_response {
           header >Content-Disposition attachment

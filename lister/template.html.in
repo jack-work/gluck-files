@@ -156,7 +156,7 @@
         {% for f in files %}
         <tr>
           <td class="glyph">&#9671;</td>
-          <td class="name"><a href="{{ f.href }}">{{ f.name }}</a></td>
+          <td class="name"><a href="{{ f.viewer or f.href }}">{{ f.name }}</a></td>
           <td class="size">{{ f.size }}</td>
           <td class="when">{{ f.when }}</td>
         </tr>
