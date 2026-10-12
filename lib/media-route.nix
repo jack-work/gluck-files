@@ -31,12 +31,32 @@
         header_up -Remote-Groups
         header_up -Remote-Email
         header_up -Remote-Name
-        @files_substitution status 301 302 303 307 308 404
+        @files_substitution status 301 302 303 305 307 308
         handle_response @files_substitution {
           respond 404
         }
+        @files_errors status 4xx 5xx
+        handle_response @files_errors {
+          copy_response_headers {
+            include Content-Range
+          }
+          respond "" {rp.status_code}
+        }
         @files_inline {
-          header Content-Type audio/mpeg audio/mp4 audio/aac audio/ogg audio/wav audio/x-wav audio/flac video/mp4 video/webm video/ogg image/jpeg image/png image/gif image/webp
+          header Content-Type audio/mpeg
+          header Content-Type audio/mp4
+          header Content-Type audio/aac
+          header Content-Type audio/ogg
+          header Content-Type audio/wav
+          header Content-Type audio/x-wav
+          header Content-Type audio/flac
+          header Content-Type video/mp4
+          header Content-Type video/webm
+          header Content-Type video/ogg
+          header Content-Type image/jpeg
+          header Content-Type image/png
+          header Content-Type image/gif
+          header Content-Type image/webp
         }
         handle_response @files_inline {
           header >Content-Disposition inline

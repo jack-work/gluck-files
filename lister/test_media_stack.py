@@ -251,6 +251,8 @@ api_bind_addr = "127.0.0.1:28393"
         self.assertEqual(status,404)
         self.assertEqual(body,b'PRIVATE_ERROR')
         self.denied(self.get('/dad/missing.mp3'))
+        self.denied(self.get('/dad/movie.mp4', headers={'Range':'bytes=999999999-'}))
+        self.denied(self.get('/dad/movie.mp4', headers={'x-amz-server-side-encryption-customer-algorithm':'AES256'}))
         self.denied(self.get('/dad/folder'))
         self.L.ACL.revoke('user:alice','dad/','read')
         self.L.ACL.grant('user:alice','dad/folder','read','fixture')
