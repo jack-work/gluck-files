@@ -364,7 +364,7 @@ api_bind_addr = "127.0.0.1:28393"
 
     def test_15_viewer_is_trusted_html_not_bucket_html(self):
         from urllib.parse import quote
-        hostile='dad/\"><script>alert(1)</script>.mp3'
+        hostile='dad/\"><script>alert(1)\u00e9.mp3'
         self.s3.put_object(Bucket='files',Key=hostile,Body=b'fixture',ContentType='audio/mpeg')
         uri='/_files/view?uri='+quote(quote('/'+hostile,safe='/'),safe='')
         status,h,body=self.get(uri)
@@ -377,7 +377,10 @@ api_bind_addr = "127.0.0.1:28393"
         self.assertNotIn(b'X-Amz-',body)
         self.denied(self.get(uri,user='bob'))
         status,h,body=self.get('/_files/view?uri=%2Fdad%2Fpage.html')
-        self.assertEqual(status,415)
+        self.assertEqual(status,200)
+        self.assertNotIn(b'<audio',body)
+        self.assertNotIn(b'<video',body)
+        self.assertIn(b'download>Download</a>',body)
         self.assertNotIn(b'PRIVATE_ACTIVE',body)
         self.denied(self.get('/_files/view?uri=%2Fdad%2F..%2Fwfh%2Fprivate.mp4'))
 

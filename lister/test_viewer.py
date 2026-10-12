@@ -32,7 +32,11 @@ class Viewer(Base):
         try:
             for mime in ['text/html','image/svg+xml','application/pdf','audio/mpeg; text/html','audio/ogg']:
                 L.s3.head_object=Mock(return_value={'ContentType':mime})
-                self.assertEqual(self.get('/_files/view?uri=%2Fdad%2Fx.mp3').status_code,415,mime)
+                r=self.get('/_files/view?uri=%2Fdad%2Fx.mp3')
+                self.assertEqual(r.status_code,200,mime)
+                self.assertNotIn(b'<audio',r.data)
+                self.assertNotIn(b'<video',r.data)
+                self.assertIn(b'download>Download</a>',r.data)
         finally:L.s3.head_object=original
 
     def test_hostile_title_and_src_are_escaped(self):
@@ -40,11 +44,15 @@ class Viewer(Base):
         original=L.s3.head_object
         L.s3.head_object=Mock(return_value={'ContentType':'audio/mpeg'})
         try:
-            r=self.get('/_files/view?uri=%2Fdad%2F%2522%253E%253Cscript%253Eevil%253C%252Fscript%253E.mp3')
+            r=self.get('/_files/view?uri=%2Fdad%2F%2522%253E%253Cscript%253Eevil%25C3%25A9.mp3')
             self.assertEqual(r.status_code,200)
             self.assertNotIn(b'<script>',r.data)
             self.assertIn(b'&lt;script&gt;',r.data)
-            self.assertIn(b'src="/dad/%22%3E%3Cscript%3Eevil%3C/script%3E.mp3"',r.data)
+            self.assertIn(b'src="/dad/%22%3E%3Cscript%3Eevil%C3%A9.mp3"',r.data)
         finally:L.s3.head_object=original
+
+    def test_newline_in_name_is_rejected(self):
+        self.grant_dad()
+        self.assertEqual(self.get('/_files/view?uri=%2Fdad%2F%250Aevil.mp3').status_code,403)
 
 if __name__=='__main__':unittest.main(verbosity=2)

@@ -298,13 +298,11 @@ def media_viewer():
     except ClientError:
         abort(404)
     kind = {"audio/mpeg": "audio", "video/mp4": "video"}.get(meta.get("ContentType"))
-    if kind is None:
-        return Response("No media viewer for this type.\n", status=415)
     return render_template_string(
         "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'>"
         "<title>{{ title }}</title><h1>{{ title }}</h1>"
         "{% if kind == 'audio' %}<audio controls preload=metadata src=\"{{ uri }}\"></audio>"
-        "{% else %}<video controls preload=metadata src=\"{{ uri }}\"></video>{% endif %}"
+        "{% elif kind == 'video' %}<video controls preload=metadata src=\"{{ uri }}\"></video>{% endif %}"
         "<p><a href=\"{{ uri }}\" download>Download</a></p>",
         title=key.rsplit("/", 1)[-1], uri=uri, kind=kind,
     )
