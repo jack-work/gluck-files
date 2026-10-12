@@ -178,18 +178,22 @@ api_bind_addr = "127.0.0.1:28393"
         c.close()
         return result
 
-    def safe_headers(self, h):
+    def safe_headers(self, h, document=False):
         self.assertIn('no-store', h['cache-control'])
         self.assertEqual(h['x-content-type-options'], 'nosniff')
-        self.assertIn('sandbox', h['content-security-policy'])
+        if document:
+            self.assertNotIn('sandbox',h['content-security-policy'])
+            self.assertIn("script-src 'none'",h['content-security-policy'])
+        else:
+            self.assertIn('sandbox',h['content-security-policy'])
         self.assertIn("default-src 'none'", h['content-security-policy'])
 
-    def denied(self, result):
+    def denied(self, result, document=False):
         status, headers, body = result
         self.assertGreaterEqual(status, 400)
         for marker in [b'PRIVATE_WFH', b'PRIVATE_SIBLING', b'PRIVATE_INDEX', b'PRIVATE_ERROR']:
             self.assertNotIn(marker, body)
-        self.safe_headers(headers)
+        self.safe_headers(headers, document=document)
 
     def test_01_real_range_and_head(self):
         status, h, body = self.get('/dad/movie.mp4', headers={'Range': 'bytes=6000-6999'})
@@ -375,14 +379,14 @@ api_bind_addr = "127.0.0.1:28393"
         self.assertNotIn(b'<script>',body)
         self.assertIn(b'<audio controls',body)
         self.assertNotIn(b'X-Amz-',body)
-        self.denied(self.get(uri,user='bob'))
+        self.denied(self.get(uri,user='bob'),document=True)
         status,h,body=self.get('/_files/view?uri=%2Fdad%2Fpage.html')
         self.assertEqual(status,200)
         self.assertNotIn(b'<audio',body)
         self.assertNotIn(b'<video',body)
         self.assertIn(b'download>Download</a>',body)
         self.assertNotIn(b'PRIVATE_ACTIVE',body)
-        self.denied(self.get('/_files/view?uri=%2Fdad%2F..%2Fwfh%2Fprivate.mp4'))
+        self.denied(self.get('/_files/view?uri=%2Fdad%2F..%2Fwfh%2Fprivate.mp4'),document=True)
 
     def test_98_first_auth_transport_error_has_policy(self):
         self.auth.shutdown()

@@ -30,7 +30,7 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE);
   const page=await context.newPage();
   const ranges=[];
   const started=Date.now();
-  page.on('request',r=>{if(r.url().includes('/dad/long.mp3'))ranges.push({seconds:(Date.now()-started)/1000,range:r.headers()['range']||null,hasCookie:!!r.headers()['cookie']});});
+  page.on('request',async r=>{if(r.url().includes('/dad/long.mp3')){const h=await r.allHeaders();ranges.push({seconds:(Date.now()-started)/1000,range:h.range||null,hasCookie:!!h.cookie});}});
   const replies=[];page.on('response',r=>{if(r.url().includes('/dad/long.mp3'))replies.push({seconds:(Date.now()-started)/1000,status:r.status()});});
   page.on('console',m=>console.log('browser:',m.text()));
   const cdp=await context.newCDPSession(page);
