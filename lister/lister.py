@@ -30,7 +30,7 @@ from flask import Flask, Response, abort, redirect, request
 from markupsafe import escape
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from acl import Acl, BadPath, normalise
+from acl import Acl, BadPath, canonical_object_uri, normalise
 
 BUCKETS = frozenset(
     b for b in os.environ.get("LISTER_BUCKETS", "files").replace(",", " ").split() if b
@@ -274,6 +274,26 @@ def refuse_when_overloaded():
         mimetype="text/plain",
         headers={"Retry-After": "2", "Cache-Control": "no-store"},
     )
+
+
+@app.get("/_files/authz")
+def authorise_object():
+    headers = {"Cache-Control": "no-store"}
+    user = caller()
+    if not user:
+        return Response("unauthenticated\n", status=401, headers=headers)
+    if bucket_for(request.host) is None:
+        return Response("denied\n", status=403, headers=headers)
+    if request.headers.get("X-Forwarded-Method") not in ("GET", "HEAD"):
+        return Response("denied\n", status=403, headers=headers)
+    try:
+        key, uri = canonical_object_uri(request.headers.get("X-Forwarded-Uri"))
+    except (BadPath, ValueError):
+        return Response("denied\n", status=403, headers=headers)
+    if not ACL.allows(user, caller_groups(), key, "read"):
+        return Response("denied\n", status=403, headers=headers)
+    headers["X-Files-URI"] = uri
+    return Response("", status=200, headers=headers)
 
 
 @app.route("/", defaults={"path": ""})

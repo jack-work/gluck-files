@@ -16,6 +16,8 @@ lldap group without this table learning about the directory.
 """
 
 import os
+import re
+from urllib.parse import quote, unquote, urlsplit
 import sqlite3
 import threading
 import time
@@ -64,6 +66,31 @@ def normalise(path):
     if out and trailing:
         out += "/"
     return out
+
+
+def canonical_object_uri(uri):
+    if not uri or not uri.startswith("/") or uri.startswith("//"):
+        raise BadPath("not an origin-form URI")
+    if re.search(r"[\x00-\x20\x7f]", uri) or "#" in uri:
+        raise BadPath("invalid URI characters")
+    raw = urlsplit(uri).path
+    if re.search(r"%(?![0-9a-fA-F]{2})|%2f|%5c", raw, re.IGNORECASE):
+        raise BadPath("invalid escape or encoded separator")
+    try:
+        decoded = unquote(raw, encoding="utf-8", errors="strict")
+    except UnicodeError as exc:
+        raise BadPath("invalid UTF-8") from exc
+    if "%" in decoded or unquote(decoded) != decoded:
+        raise BadPath("ambiguous percent encoding")
+    if re.search(r"[\x00-\x1f\x7f\\]", decoded):
+        raise BadPath("invalid key characters")
+    segments = decoded[1:].split("/")
+    if any(not p or p in (".", "..") or p.endswith((".", " ")) for p in segments):
+        raise BadPath("noncanonical object path")
+    key = "/".join(segments)
+    if normalise(key) != key:
+        raise BadPath("noncanonical key")
+    return key, quote("/" + key, safe="/")
 
 
 def ancestors(path):

@@ -8,6 +8,13 @@
   outputs =
     { self, nixpkgs, zanni, ... }:
     let
+      mkListerSrc = pkgs: pkgs.runCommand "gluck-files-lister-src" { } ''
+        mkdir -p $out
+        cp ${./lister/acl.py}    $out/acl.py
+        cp ${./lister/lister.py} $out/lister.py
+        cp ${./lister/aclctl.py} $out/aclctl.py
+      '';
+      mediaHeaders = import ./lib/media-headers.nix;
       nixosModule =
         { config, lib, pkgs, ... }:
         let
@@ -22,12 +29,7 @@
           # store as a DIRECTORY. Passing a single .py file copies that file
           # alone and the unit dies at startup on ModuleNotFoundError. That
           # happened on this estate once already.
-          listerSrc = pkgs.runCommand "gluck-files-lister-src" { } ''
-            mkdir -p $out
-            cp ${./lister/acl.py}    $out/acl.py
-            cp ${./lister/lister.py} $out/lister.py
-            cp ${./lister/aclctl.py} $out/aclctl.py
-          '';
+          listerSrc = mkListerSrc pkgs;
 
           listerPython = pkgs.python3.withPackages (ps: with ps; [
             flask
@@ -52,11 +54,10 @@
           # no longer a path that reaches Garage's web endpoint directly, which
           # is the whole point: a policy checked only on directory requests
           # would govern the listing and nothing else.
-          browserPathConfig = ''
-            @bearer header Authorization Bearer*
-            respond @bearer 403
-            header Cache-Control "no-store"
-          '';
+          browserPathConfig = import ./lib/media-route.nix {
+            listerAddress = "127.0.0.1:${toString cfg.listerPort}";
+            garageAddress = "127.0.0.1:${toString cfg.ports.web}";
+          };
 
           # The retention vocabulary, declared ONCE. These strings name the
           # prefixes in the graveyard bucket AND supply the day counts of the
@@ -555,6 +556,7 @@
               # a short-lived presigned URL on the S3 door instead.
               proxyTo = cfg.listerPort;
               extraConfig = browserPathConfig;
+              responseHeaders = mediaHeaders;
             };
 
 
@@ -629,14 +631,51 @@
             # pipefail is load-bearing: without it the pipeline reports tee's
             # exit status and a failing test builds green.
             set -o pipefail
-            cp ${./lister}/*.py .
+            cp ${./lister}/test_*.py .
+            export PYTHONPATH=${mkListerSrc pkgs}
             export LISTER_ACL_DB=$PWD/acl-test.db
             ${py}/bin/python3 ${file} 2>&1 | tee $out
           '';
         in {
           acl = suite "acl" "test_acl.py";
           gateway = suite "gateway" "test_gateway.py";
+          authz = suite "authz" "test_authz.py";
           bucket-for = suite "bucket-for" "test_lister.py";
+
+          media-stack = pkgs.runCommand "gluck-files-media-stack" {
+            nativeBuildInputs = [ py pkgs.caddy pkgs.garage_1_x ];
+            LISTER_SRC = mkListerSrc pkgs;
+            MEDIA_CADDYFILE = pkgs.writeText "files-media-test-Caddyfile" ''
+              {
+                auto_https off
+                admin off
+              }
+              :28780 {
+                route {
+                  header {
+                    ${pkgs.lib.concatStringsSep "\n" (pkgs.lib.mapAttrsToList
+                      (name: value: ">${name} ${builtins.toJSON value}") mediaHeaders)}
+                  }
+                  request_header -Remote-User
+                  request_header -Remote-Groups
+                  request_header -Remote-Email
+                  request_header -Remote-Name
+                  forward_auth 127.0.0.1:28091 {
+                    uri /api/authz/forward-auth
+                    copy_headers Remote-User Remote-Groups Remote-Email Remote-Name
+                  }
+                  ${import ./lib/media-route.nix {
+                    listerAddress = "127.0.0.1:28999";
+                    garageAddress = "127.0.0.1:28392";
+                  }}
+                  reverse_proxy 127.0.0.1:28999
+                }
+              }
+            '';
+          } ''
+            set -euo pipefail
+            python3 ${./lister/test_media_stack.py} 2>&1 | tee $out
+          '';
 
           # What the module SHIPS, not what the tests assemble. The suites copy
           # every .py file into one directory; the unit executes a store path
@@ -644,12 +683,7 @@
           # the units died on ModuleNotFoundError while every suite was green.
           packaging = pkgs.runCommand "gluck-files-packaging" { } ''
             set -o pipefail
-            SRC=${pkgs.runCommand "gluck-files-lister-src-check" { } ''
-              mkdir -p $out
-              cp ${./lister/acl.py}    $out/acl.py
-              cp ${./lister/lister.py} $out/lister.py
-              cp ${./lister/aclctl.py} $out/aclctl.py
-            ''}
+            SRC=${mkListerSrc pkgs}
             for m in acl.py lister.py aclctl.py; do
               test -f "$SRC/$m" || { echo "MISSING from shipped tree: $m"; exit 1; }
             done
