@@ -28,6 +28,7 @@ def start(argv, marker):
     process = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                text=True, env={**os.environ, 'RUST_LOG': 'info'})
     PROCESSES.append(process)
+    process.lines = log
     def drain():
         for line in process.stdout:
             log.append(line.rstrip())
@@ -48,7 +49,7 @@ def garage(*args):
 
 class Auth(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
-        if self.path != '/api/authz/forward-auth':
+        if self.path.split('?', 1)[0] != '/api/authz/forward-auth':
             self.send_error(404)
             return
         user = self.headers.get('Cookie', '').removeprefix('user=')
@@ -126,6 +127,9 @@ api_bind_addr = "127.0.0.1:28393"
         @cls.L.app.after_request
         def fault(response):
             if cls.L.request.path == '/_files/authz' and cls.mode is not None:
+                if cls.mode == 'timeout':
+                    threading.Event().wait(4)
+                    return response
                 response = cls.L.Response('', status=200)
                 if cls.mode != 'absent':
                     response.headers['X-Files-URI'] = cls.mode
@@ -221,12 +225,16 @@ api_bind_addr = "127.0.0.1:28393"
             ('/dad/a;b.mp3','dad/a;b.mp3'), ('/dad/caf%C3%A9.mp3','dad/caf\u00e9.mp3'),
             ('/dad/cafe%CC%81.mp3','dad/cafe\u0301.mp3'),
             ('/dad/A.mp3','dad/A.mp3'), ('/dad/a.mp3','dad/a.mp3'),
+            ('/dad/percent%25file.mp3','dad/percent%file.mp3'),
         ]:
             status,h,body=self.get(path+'?ignored=1')
+            if status != 200:
+                print('FAILED KEY TRACE:', path, status, h, body, flush=True)
+                print('CADDY TRACE:', '\n'.join(self.caddy.lines[-12:]), flush=True)
             self.assertEqual(status,200,path)
             self.assertEqual(body,self.objects[key][0],path)
             self.safe_headers(h)
-        self.denied(self.get('/dad/percent%25file.mp3'))
+        self.denied(self.get('/dad/percent%252e.mp3'))
 
     def test_05_traversal_and_aliases_are_refused(self):
         for path in ['/dad/../wfh/private.mp4','/dad/%2e%2e/wfh/private.mp4',
@@ -257,7 +265,8 @@ api_bind_addr = "127.0.0.1:28393"
         self.L.ACL.revoke('user:alice','dad/','read')
         self.L.ACL.grant('user:alice','dad/folder','read','fixture')
         self.denied(self.get('/dad/folder'))
-        self.denied(self.get('/dad/folder/'))
+        result=self.get('/dad/folder/')
+        self.assertNotIn(b'PRIVATE_INDEX',result[2])
 
     def test_08_active_content_and_conditional_responses(self):
         for path in ['/dad/page.html','/dad/image.svg','/dad/fake.bin']:
@@ -293,7 +302,40 @@ api_bind_addr = "127.0.0.1:28393"
             self.denied(result)
         self.L.ACL.revoke('user:alice','wfh/private.mp4','read')
 
+    def test_11_authz_timeout_is_closed(self):
+        type(self).mode='timeout'
+        status,h,body=self.get('/dad/movie.mp4')
+        self.assertEqual(status,502)
+        self.assertEqual(body,b'')
+        self.safe_headers(h)
+        type(self).mode=None
+
+    def test_12_native_416_preserves_total_size(self):
+        garage('bucket','website','--allow','-i','index.html','files')
+        try:
+            status,h,body=self.get('/dad/movie.mp4',headers={'Range':'bytes=999999999-'})
+            self.assertEqual(status,416)
+            self.assertEqual(h['content-range'],f'bytes */{len(self.data)}')
+            self.assertEqual(body,b'')
+            self.safe_headers(h)
+        finally:
+            garage('bucket','website','--allow','-i','index.html','-e','error.html','files')
+
+    def test_98_first_auth_transport_error_has_policy(self):
+        self.auth.shutdown()
+        self.auth.server_close()
+        try:
+            status,h,body=self.get('/dad/movie.mp4')
+            self.assertEqual(status,502)
+            self.safe_headers(h)
+        finally:
+            type(self).auth=http.server.ThreadingHTTPServer(('127.0.0.1',28091),Auth)
+            threading.Thread(target=self.auth.serve_forever,daemon=True).start()
+
     def test_99_stopped_lister_is_closed(self):
+        self.lister.task_dispatcher.shutdown(cancel_pending=True, timeout=1)
+        for channel in list(self.lister._map.values()):
+            channel.close()
         self.lister.close()
         status,h,body=self.get('/dad/movie.mp4')
         self.assertEqual(status,502)

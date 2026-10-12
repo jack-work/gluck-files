@@ -549,6 +549,7 @@
             services.kelliher-web.sites.gluck-files = {
               subdomains = [ "files" ];
               requireAuth = true;
+              trustsRemoteHeaders = true;
               requiredGroups = [ "files-admin" ];
               # THE GATEWAY, not Garage. Garage's web endpoint on
               # cfg.ports.web is no longer reachable from any hostname: every
@@ -669,6 +670,13 @@
                     garageAddress = "127.0.0.1:28392";
                   }}
                   reverse_proxy 127.0.0.1:28999
+                }
+                handle_errors {
+                  header {
+                    ${pkgs.lib.concatStringsSep "\n" (pkgs.lib.mapAttrsToList
+                      (name: value: ">${name} ${builtins.toJSON value}") mediaHeaders)}
+                  }
+                  respond "" {err.status_code}
                 }
               }
             '';

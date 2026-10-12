@@ -27,6 +27,7 @@ class Canonical(unittest.TestCase):
             ('/dad/a%23b.mp3', 'dad/a#b.mp3', '/dad/a%23b.mp3'),
             ('/dad/a%3fb.mp3', 'dad/a?b.mp3', '/dad/a%3Fb.mp3'),
             ('/dad/a;b.mp3', 'dad/a;b.mp3', '/dad/a%3Bb.mp3'),
+            ('/dad/percent%25file.mp3','dad/percent%file.mp3','/dad/percent%25file.mp3'),
             ('/dad/caf%C3%A9.mp3', 'dad/caf\u00e9.mp3', '/dad/caf%C3%A9.mp3'),
             ('/dad/cafe%CC%81.mp3', 'dad/cafe\u0301.mp3', '/dad/cafe%CC%81.mp3'),
             ('/dad/A.mp3?download=1', 'dad/A.mp3', '/dad/A.mp3'),
@@ -41,7 +42,7 @@ class Canonical(unittest.TestCase):
                     '/dad/%2e%2e/secret/x', '/dad/%252e%252e/secret/x',
                     '/dad%2Fx', '/dad%5Cx', '/dad\\x', '/dad/x.',
                     '/dad/x%20', '/dad/%00x', '/dad/%0ax', '/dad/%ff',
-                    '/dad/%GG', '/dad/x%25file', '/dad/x%2520file',
+                    '/dad/%GG', '/dad/x%2520file',
                     '/dad/x#fragment', '/dad/a b']:
             with self.assertRaises((BadPath, ValueError), msg=str(uri)):
                 canonical_object_uri(uri)

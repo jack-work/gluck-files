@@ -80,7 +80,7 @@ def canonical_object_uri(uri):
         decoded = unquote(raw, encoding="utf-8", errors="strict")
     except UnicodeError as exc:
         raise BadPath("invalid UTF-8") from exc
-    if "%" in decoded or unquote(decoded) != decoded:
+    if unquote(decoded) != decoded:
         raise BadPath("ambiguous percent encoding")
     if re.search(r"[\x00-\x1f\x7f\\]", decoded):
         raise BadPath("invalid key characters")
