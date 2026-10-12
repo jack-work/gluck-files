@@ -83,3 +83,12 @@ HEAD 403 responses were not evidence about stored metadata.
 The old failing delivery used the signed S3 API on 3900, not website mode on
 3902. Website error-document substitution could not contribute to that observed
 presign-expiry failure; its 400 XML response was independent of website config.
+
+Compatibility survey, 2026-10-12: 290 existing keys, zero literal percent,
+trailing dot/space or empty/dot segments; one interior-space key. The exact key
+`cs7641/quizzes/sl-quiz/SL Unit Quiz_ CS7641_ Machine Learning - Fall 2026.pdf`
+is a regression fixture. Re-run the survey before tightening the predicate.
+
+Headers are generated from one response policy for both normal and Caddy error
+handlers. HTTP-parser rejections before routing have only fixed server errors,
+never bucket bytes; they cannot inherit route headers.

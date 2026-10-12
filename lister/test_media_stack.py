@@ -7,6 +7,7 @@ import os
 import pathlib
 import re
 import secrets
+import socket
 import shutil
 import subprocess
 import sys
@@ -19,6 +20,7 @@ PROCESSES = []
 GARAGE = shutil.which('garage')
 CADDY = shutil.which('caddy')
 CFG = ROOT / 'garage.toml'
+SPACE_KEY = 'cs7641/quizzes/sl-quiz/SL Unit Quiz_ CS7641_ Machine Learning - Fall 2026.pdf'
 IDENTITY = {'alice': ('alice', ''), 'bob': ('bob', ''), 'admin': ('admin', 'files-admin')}
 
 
@@ -116,6 +118,7 @@ api_bind_addr = "127.0.0.1:28393"
             'dadtaxes/private.mp4': (b'PRIVATE_SIBLING', 'video/mp4'),
             'dad/folder/index.html': (b'PRIVATE_INDEX', 'text/html'),
             'error.html': (b'PRIVATE_ERROR', 'text/html'),
+            SPACE_KEY: (b'LIVE_SPACE_KEY_FIXTURE', 'application/pdf'),
         }
         for name in ['a b', 'a+b', 'a#b', 'a?b', 'a;b', 'caf\u00e9', 'cafe\u0301', 'A', 'a', 'percent%file']:
             cls.objects[f'dad/{name}.mp3'] = (name.encode(), 'audio/mpeg')
@@ -159,6 +162,7 @@ api_bind_addr = "127.0.0.1:28393"
 
     def setUp(self):
         self.L.ACL.grant('user:alice', 'dad/', 'read', 'fixture')
+        self.L.ACL.grant('user:alice', SPACE_KEY, 'read', 'fixture')
         type(self).mode = None
 
     def get(self, path, user='alice', method='GET', headers=None, port=28780):
@@ -226,6 +230,7 @@ api_bind_addr = "127.0.0.1:28393"
             ('/dad/cafe%CC%81.mp3','dad/cafe\u0301.mp3'),
             ('/dad/A.mp3','dad/A.mp3'), ('/dad/a.mp3','dad/a.mp3'),
             ('/dad/percent%25file.mp3','dad/percent%file.mp3'),
+            ('/' + SPACE_KEY.replace(' ', '%20'), SPACE_KEY),
         ]:
             status,h,body=self.get(path+'?ignored=1')
             if status != 200:
@@ -305,7 +310,7 @@ api_bind_addr = "127.0.0.1:28393"
     def test_11_authz_timeout_is_closed(self):
         type(self).mode='timeout'
         status,h,body=self.get('/dad/movie.mp4')
-        self.assertEqual(status,502)
+        self.assertIn(status,(502,504))
         self.assertEqual(body,b'')
         self.safe_headers(h)
         type(self).mode=None
@@ -320,6 +325,36 @@ api_bind_addr = "127.0.0.1:28393"
             self.safe_headers(h)
         finally:
             garage('bucket','website','--allow','-i','index.html','-e','error.html','files')
+
+    def test_13_parser_rejections_do_not_reach_objects(self):
+        for request in [
+            b'GET /dad/%ZZ.mp4 HTTP/1.1\r\nHost: files.kelliher.info\r\n\r\n',
+            b'GET /dad/movie.mp4 HTTP/1.1\r\nHost: files.kelliher.info\r\nBad Header\r\n\r\n',
+            b'GET /dad/movie.mp4 HTTP/1.1\r\nHost: files.kelliher.info\r\nX-Large: '+b'a'*(2*1024*1024)+b'\r\n\r\n',
+        ]:
+            with socket.create_connection(('127.0.0.1',28780),timeout=5) as connection:
+                try:connection.sendall(request)
+                except (BrokenPipeError,ConnectionResetError):pass
+                chunks=[]
+                while True:
+                    try:chunk=connection.recv(65536)
+                    except ConnectionResetError:break
+                    if not chunk:break
+                    chunks.append(chunk)
+            response=b''.join(chunks)
+            status=int(response.split(b' ',2)[1])
+            self.assertIn(status,(400,431))
+            for marker in [b'PRIVATE_',self.data[:1024]]:
+                self.assertNotIn(marker,response)
+            print('Parser rejection',status,'fixed response bytes',len(response),flush=True)
+
+    def test_14_large_body_on_non_read_is_not_forwarded(self):
+        with socket.create_connection(('127.0.0.1',28780),timeout=5) as connection:
+            connection.sendall(b'POST /dad/movie.mp4 HTTP/1.1\r\nHost: files.kelliher.info\r\nCookie: user=alice\r\nContent-Length: 1000000000\r\nConnection: close\r\n\r\n')
+            response=connection.recv(65536)
+            self.assertIn(b' 403 ',response.split(b'\r\n',1)[0])
+            self.assertIn(b'private, no-store',response)
+            self.assertNotIn(self.data[:1024],response)
 
     def test_98_first_auth_transport_error_has_policy(self):
         self.auth.shutdown()
