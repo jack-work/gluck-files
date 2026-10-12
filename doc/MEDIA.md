@@ -65,7 +65,8 @@ on real Garage and prove neither body crosses the proxy.
 The old S3 redirect provided accidental origin isolation. Streaming makes bucket
 bytes same-origin with the file listing. Replacement controls apply before the
 first auth hop, including errors: private/no-store, nosniff, and sandbox CSP with
-no scripts, forms, base URL or framing.
+no scripts, forms, base URL or framing. Same-origin media/images, inline styles
+and data fonts remain allowed for native players and the directory page.
 
 Only the enumerated audio/video MIME types and JPEG/PNG/GIF/WebP display inline.
 Everything else, including HTML, SVG and PDF, is an attachment. Upstream
@@ -92,3 +93,8 @@ is a regression fixture. Re-run the survey before tightening the predicate.
 Headers are generated from one response policy for both normal and Caddy error
 handlers. HTTP-parser rejections before routing have only fixed server errors,
 never bucket bytes; they cannot inherit route headers.
+
+Parser controls on deployed Caddy 2.11.2 returned fixed 400 and 431 responses
+(103 and 143 bytes), never object bytes. These are generated before Caddy
+routing, so no-store, CSP and nosniff are absent there. The regression checks
+require no request/path reflection or server-version header.

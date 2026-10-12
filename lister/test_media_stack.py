@@ -344,6 +344,12 @@ api_bind_addr = "127.0.0.1:28393"
             response=b''.join(chunks)
             status=int(response.split(b' ',2)[1])
             self.assertIn(status,(400,431))
+            header,_,body=response.partition(b'\r\n\r\n')
+            self.assertIn(body.strip(),(b'400 Bad Request',b'431 Request Header Fields Too Large'))
+            self.assertNotIn(b'/dad/',response)
+            self.assertNotIn(b'Server:',header)
+            for name in [b'Cache-Control:',b'Content-Security-Policy:',b'X-Content-Type-Options:']:
+                self.assertNotIn(name,header)
             for marker in [b'PRIVATE_',self.data[:1024]]:
                 self.assertNotIn(marker,response)
             print('Parser rejection',status,'fixed response bytes',len(response),flush=True)
