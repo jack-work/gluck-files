@@ -363,6 +363,16 @@
               '';
             };
 
+            webEndpoint = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = ''
+                Run Garage's static web endpoint. It serves every object in the
+                website bucket to any local process with no credential, so it
+                stays off until something enforces access in front of it.
+              '';
+            };
+
             ports = {
               s3 = lib.mkOption {
                 type = lib.types.port;
@@ -377,7 +387,7 @@
               web = lib.mkOption {
                 type = lib.types.port;
                 default = 3902;
-                description = "Static web endpoint. Loopback only; Caddy fronts it at files.<domain>.";
+                description = "Static web endpoint, used only when webEndpoint is true.";
               };
               admin = lib.mkOption {
                 type = lib.types.port;
@@ -421,18 +431,16 @@
                   root_domain = ".s3.${lib.head config.services.kelliher-web.baseDomains}";
                 };
 
-                s3_web = {
-                  bind_addr = "127.0.0.1:${toString cfg.ports.web}";
-                  # The browser path's bucket router: Host `files.<domain>`
-                  # minus this suffix is the bucket name.
-                  root_domain = ".${lib.head config.services.kelliher-web.baseDomains}";
-                  index = "index.html";
-                };
-
                 admin = {
                   api_bind_addr = "127.0.0.1:${toString cfg.ports.admin}";
                 } // lib.optionalAttrs (cfg.adminTokenFile != null) {
                   admin_token_file = cfg.adminTokenFile;
+                };
+              } // lib.optionalAttrs cfg.webEndpoint {
+                s3_web = {
+                  bind_addr = "127.0.0.1:${toString cfg.ports.web}";
+                  root_domain = ".${lib.head config.services.kelliher-web.baseDomains}";
+                  index = "index.html";
                 };
               };
             };
