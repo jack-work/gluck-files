@@ -20,6 +20,7 @@ on the root, which inherits everywhere. One mechanism, one code path.
 
 import logging
 import os
+import socket
 import sys
 from datetime import timezone
 
@@ -337,12 +338,24 @@ def upstream(err):
     )
 
 
+def inherited_sockets():
+    if os.environ.get("LISTEN_PID") != str(os.getpid()):
+        return []
+    return [socket.socket(fileno=3 + i) for i in range(int(os.environ.get("LISTEN_FDS", "0")))]
+
+
 def main():
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     from waitress import create_server
 
-    port = int(os.environ.get("LISTER_PORT", "9099"))
-    server = create_server(app, host="127.0.0.1", port=port, threads=4, ident=None)
+    sockets = inherited_sockets()
+    if sockets:
+        server = create_server(app, sockets=sockets, threads=4, ident=None)
+    elif os.environ.get("LISTER_LISTEN") == "socket":
+        sys.exit("no listening socket from systemd; refusing to fall back to TCP")
+    else:
+        port = int(os.environ.get("LISTER_PORT", "9099"))
+        server = create_server(app, host="127.0.0.1", port=port, threads=4, ident=None)
     ADMISSION.watch(server)
     server.run()
 

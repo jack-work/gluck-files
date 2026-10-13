@@ -8,6 +8,13 @@
   outputs =
     { self, nixpkgs, zanni, ... }:
     let
+      listerSrcFor = pkgs: pkgs.runCommand "gluck-files-lister-src" { } ''
+        mkdir -p $out
+        cp ${./lister/acl.py}    $out/acl.py
+        cp ${./lister/lister.py} $out/lister.py
+        cp ${./lister/aclctl.py} $out/aclctl.py
+      '';
+
       nixosModule =
         { config, lib, pkgs, ... }:
         let
@@ -18,16 +25,7 @@
 
           baseDomain = lib.head config.services.kelliher-web.baseDomains;
 
-          # The lister now imports acl.py, so the entrypoint must reach the
-          # store as a DIRECTORY. Passing a single .py file copies that file
-          # alone and the unit dies at startup on ModuleNotFoundError. That
-          # happened on this estate once already.
-          listerSrc = pkgs.runCommand "gluck-files-lister-src" { } ''
-            mkdir -p $out
-            cp ${./lister/acl.py}    $out/acl.py
-            cp ${./lister/lister.py} $out/lister.py
-            cp ${./lister/aclctl.py} $out/aclctl.py
-          '';
+          listerSrc = listerSrcFor pkgs;
 
           listerPython = pkgs.python3.withPackages (ps: with ps; [
             flask
@@ -333,12 +331,6 @@
               '';
             };
 
-            listerPort = lib.mkOption {
-              type = lib.types.port;
-              default = 9099;
-              description = "Loopback port for the directory lister.";
-            };
-
             listerUser = lib.mkOption {
               type = lib.types.str;
               default = "gluck-files-lister";
@@ -476,7 +468,7 @@
                 LISTER_ENDPOINT = "http://127.0.0.1:${toString cfg.ports.s3}";
                 LISTER_REGION = cfg.region;
                 LISTER_TEMPLATE = listerTemplate;
-                LISTER_PORT = toString cfg.listerPort;
+                LISTER_LISTEN = "socket";
                 # Presigned URLs must be followable from a browser, so they are
                 # signed against the PUBLIC S3 door rather than loopback.
                 LISTER_PUBLIC_ENDPOINT = "https://s3.${baseDomain}";
@@ -545,8 +537,8 @@
             #
             # The two lines below are belt and braces, and they are not
             # redundant. The platform's assertion that refuses `bearerBypass`
-            # on a static tree cannot fire here, because this site is a
-            # `proxyTo` like any API. So a future author could switch the
+            # on a static tree cannot fire here, because this site proxies to a
+            # backend like any API. So a future author could switch the
             # bypass on for this hostname and reopen exactly the hole this
             # service was built to close. These lines make that switch
             # ineffective rather than merely inadvisable.
@@ -557,11 +549,7 @@
               subdomains = [ "files" ];
               requireAuth = true;
               requiredGroups = [ "files-admin" ];
-              # THE GATEWAY, not Garage. Garage's web endpoint on
-              # cfg.ports.web is no longer reachable from any hostname: every
-              # request is decided by the ACL table first, and bytes arrive via
-              # a short-lived presigned URL on the S3 door instead.
-              proxyTo = cfg.listerPort;
+              proxySocket = "gluck-files-lister.service";
               extraConfig = browserPathConfig;
             };
 
@@ -646,18 +634,20 @@
           gateway = suite "gateway" "test_gateway.py";
           bucket-for = suite "bucket-for" "test_lister.py";
 
+          socket = pkgs.runCommand "gluck-files-socket" { } ''
+            set -o pipefail
+            export LISTER_SRC=${listerSrcFor pkgs}
+            export SOCKET_ACTIVATE=${pkgs.systemd}/bin/systemd-socket-activate
+            ${py}/bin/python3 -u ${./lister/test_socket.py} 2>&1 | tee $out
+          '';
+
           # What the module SHIPS, not what the tests assemble. The suites copy
           # every .py file into one directory; the unit executes a store path
           # built from an explicit list. Those disagreed once, in portero, and
           # the units died on ModuleNotFoundError while every suite was green.
           packaging = pkgs.runCommand "gluck-files-packaging" { } ''
             set -o pipefail
-            SRC=${pkgs.runCommand "gluck-files-lister-src-check" { } ''
-              mkdir -p $out
-              cp ${./lister/acl.py}    $out/acl.py
-              cp ${./lister/lister.py} $out/lister.py
-              cp ${./lister/aclctl.py} $out/aclctl.py
-            ''}
+            SRC=${listerSrcFor pkgs}
             for m in acl.py lister.py aclctl.py; do
               test -f "$SRC/$m" || { echo "MISSING from shipped tree: $m"; exit 1; }
             done
