@@ -95,6 +95,13 @@ accepted until the live check passes: an authorised GET and Range on the stable
 URL, then the identical URL with no session from the same colo, must yield the
 Authelia redirect or 403, never `CF-Cache-Status: HIT`, never object bytes.
 
+Two traps, both measured on this zone 2026-10-13:
+
+| trap | so |
+|---|---|
+| Garage 1.3.1 drops `response-cache-control` on 206 responses | Caddy stamps no-store on partial responses itself. Never ask Garage to |
+| Cloudflare fills an ABSENT Cache-Control with `max-age=14400`, and relays a present `private, no-store` | every response path must carry the header, errors included. One path without it is a public edge copy for an unmeasured period |
+
 ## Recorded negatives
 
 All ten `cs7641/audio/*.mp3` objects were `audio/mpeg` with byte ranges and the
