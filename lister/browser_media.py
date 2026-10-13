@@ -37,11 +37,13 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE);
   await cdp.send('Network.enable');
   await cdp.send('Network.setCacheDisabled',{cacheDisabled:true});
   await cdp.send('Network.emulateNetworkConditions',{offline:false,latency:0,downloadThroughput:16000,uploadThroughput:1000000});
-  await page.goto('http://files.kelliher.info:28780/_files/view?uri=%2Fdad%2Flong.mp3',{waitUntil:'domcontentloaded'});
+  await page.goto(process.env.MEDIA_DIRECT==='1'?'http://files.kelliher.info:28780/dad/long.mp3':'http://files.kelliher.info:28780/_files/view?uri=%2Fdad%2Flong.mp3',{waitUntil:'domcontentloaded'});
   await page.waitForSelector('audio,video',{timeout:15000});
   console.log('native-player',await page.locator('audio,video').evaluate(m=>({tag:m.tagName,current:m.currentTime,ready:m.readyState,error:m.error&&m.error.code})));
   await page.locator('audio,video').evaluate(m=>Promise.race([m.play(),new Promise((_,reject)=>setTimeout(()=>reject(Error('play did not start')),15000))]));
-  if(process.env.MEDIA_SMOKE==='1') {
+  if(process.env.MEDIA_COOKIE_ONLY==='1') {
+    console.log('cookie-mechanism',JSON.stringify(ranges),JSON.stringify(replies),await page.locator('audio,video').evaluate(m=>({ready:m.readyState,time:m.currentTime})));
+  } else if(process.env.MEDIA_SMOKE==='1') {
     await page.waitForFunction(()=>document.querySelector('audio,video').currentTime>2,{},{timeout:15000});
   } else {
     await page.waitForFunction(()=>document.querySelector('audio,video').currentTime>125,{},{timeout:160000});

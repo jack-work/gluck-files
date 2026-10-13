@@ -1,100 +1,116 @@
 ---
 name: MEDIA
-description: Object authorization and same-origin streaming. Read before changing the files Caddy route or the authorizer.
+description: Object authorization, same-origin streaming and the media viewer. Read before changing the files Caddy route, the authorizer, the viewer or any response header policy.
 ---
 
 # Media delivery
 
-Status: implementation under review, not deployed. Acceptance requires a real
-browser to play beyond 120 seconds and seek through `files.kelliher.info`.
+Status: implementation under review, not deployed.
 
 | route | enforcement | bytes |
 |---|---|---|
 | browser directory | Authelia, then lister `list` | lister HTML |
+| `/_files/view?uri=` | Authelia, then lister `read` | lister HTML embedding the stable object path |
 | browser object, GET or HEAD | Authelia, then `/_files/authz` checks `read` on every request | Caddy proxies Garage web |
-| direct legacy lister object | lister `read` | 120-second presigned redirect |
 
-The browser keeps the files URL. No capability URL expires beneath a player.
-Legacy presigns remain bearer capabilities until expiry, including after an ACL
-revocation. Existing in-flight transfers also complete; revocation stops the next
-request, not bytes already authorized. Authelia's cached groups retain its normal
-refresh interval. Path-grant revocation is read from sqlite on the next request.
+The browser never receives a capability URL. Every Range a player sends after a
+seek is re-authorised. Revocation stops the next request; bytes already sent are
+not recalled. Authelia's cached groups keep their normal refresh interval;
+path-grant revocation is read from sqlite on the next request.
+
+What the old design bought and what replaces it: the 302 to a presigned
+`s3.kelliher.info` URL gave accidental origin isolation, because bucket bytes
+came from a different origin. That isolation is now provided by response policy:
+bucket bytes are never a document.
 
 ## URI contract
 
 Caddy supplies `X-Forwarded-Uri`, `X-Forwarded-Method`, and authenticated
-`Remote-*`. The lister trusts those headers on loopback; loopback callers are
-trusted, not independently authenticated. Public callers cannot supply identity:
-Caddy removes their `Remote-*` before Authelia stamps it.
+`Remote-*`. The site declares `trustsRemoteHeaders`; the build checks the strip
+and unconditional `forward_auth` in the rendered Caddyfile. The lister trusts
+those headers on loopback.
 
-The authorizer decodes the path once, checks the same ACL engine, and returns
-`X-Files-URI`, escaped with `quote('/' + key, safe='/')`. Caddy removes the
-client's copy, requires a nonempty valid echo from this response, and rewrites the
-Garage request to it. Query parameters are discarded. No later handler selects
-a different key.
+That answers identity provenance. Key binding is separate: the authorizer
+decodes the path once, checks the ACL, and returns `X-Files-URI`, escaped with
+`quote('/' + key, safe='/')`. Caddy removes the client's copy, requires a
+nonempty valid echo from this response, and rewrites the Garage request to it.
+Query parameters are discarded. Nothing else selects a key.
 
 | input | rule |
 |---|---|
 | empty segments, dot segments, trailing slash/dot/space | refuse |
 | encoded separators, backslashes, controls, invalid escapes/UTF-8 | refuse |
 | an encoding changed by a second decode | refuse |
-| spaces inside names, plus, literal percent, hash, question mark, semicolon | decode once, escape in the echo |
+| spaces, plus, literal percent, hash, question mark, semicolon | decode once, escape in the echo |
 | case and Unicode code points | preserve; NFC and NFD remain distinct |
-| missing, empty or malformed echo; authorizer error/timeout | refuse; never use the original URI as fallback |
+| missing, empty or malformed echo; authorizer error/timeout | refuse; never fall back to the original URI |
 
-The endpoint returns 200 with an empty body and canonical echo, 401 for missing
-identity, or 403 for refusal. Every response is no-store. It neither looks up nor
-reads an object. GET and HEAD make the same decision; Range is not a separate
-permission.
+Every authorizer response is no-store. It neither looks up nor reads an object.
+GET and HEAD make the same decision; Range is not a separate permission.
 
 ## Garage is a raw capability
 
 `127.0.0.1:3902` serves the whole website bucket without authentication. The
 boundary is: Caddy never reaches it without a successful authorizer response.
 
-Garage 1.3.1 decodes once and preserves case, slashes and Unicode. Website
-substitutions are unsafe: trailing slash selects an index, missing keys can
-redirect, and configured error documents replace bodies on any GET 4xx,
-including 400 and 416. The canonical echo excludes index requests. Caddy
-suppresses redirects and every 4xx/5xx body, retaining error status and native
-Content-Range where available. Tests configure a private index and error document
-on real Garage and prove neither body crosses the proxy.
+Garage 1.3.1 decodes once and preserves case, slashes and Unicode. Website mode
+substitutes other keys: a trailing slash selects an index, missing keys can
+redirect, and a configured error document replaces the body of any GET 4xx,
+including 400 and 416. The canonical echo excludes index requests; Caddy turns
+redirects into 404 and strips every 4xx/5xx body, keeping status and
+Content-Range, so a 416 still reports the total size.
 
-## Browser origin
+## Response policy
 
-The old S3 redirect provided accidental origin isolation. Streaming makes bucket
-bytes same-origin with the file listing. Replacement controls apply before the
-first auth hop, including errors: private/no-store, nosniff, and sandbox CSP with
-no scripts, forms, base URL or framing. Same-origin media/images, inline styles
-and data fonts remain allowed for native players and the directory page.
+| response | policy |
+|---|---|
+| every bucket byte, success, partial, 304, error | `Content-Disposition: attachment`, `private, no-store`, nosniff, CSP `sandbox` with `default-src 'none'` and same-origin media/img |
+| viewer and listing HTML | app-owned templates, autoescaped; CSP with `script-src 'none'`, `object-src 'none'`, no sandbox |
+| Caddy transport errors | same policy, generated from the same map by `handle_errors` |
+| raw HTTP parser rejects (400, 431) | fixed text before routing. Route headers cannot exist there; tests require no request echo and no server version |
 
-Only the enumerated audio/video MIME types and JPEG/PNG/GIF/WebP display inline.
-Everything else, including HTML, SVG and PDF, is an attachment. Upstream
-Content-Disposition and cache/CSP headers cannot loosen this policy. Python
-never carries object bytes. The public S3 hostname remains unchanged; removing
-it would break signed clients and is a separate decision.
+The media element loads the object as a same-origin subresource of the trusted
+viewer, so its Range requests carry the Lax session cookie. Attachment and the
+sandbox directive govern navigation, not subresource loads; both were verified
+in Chromium rather than assumed. Unsupported types get the viewer page with a
+plain download link. A direct link to any object downloads rather than renders,
+deliberately.
 
-## Recorded negative
+A sandboxed media document was tried first. Its opaque origin dropped the
+session cookie on later Range requests, which returned 401. Adding
+`allow-same-origin` without `allow-scripts` was attempted and NOT established
+either way; it is neither proven nor a dead end.
 
-Content-Type audited 2026-10-12 with legitimate SigV4 credentials over an SSH
-tunnel: all ten `cs7641/audio/*.mp3` objects were `audio/mpeg`, supported byte
-ranges, and matched listed sizes. Metadata is not a contributing cause. Public
-HEAD 403 responses were not evidence about stored metadata.
+## Edge cache
 
-The old failing delivery used the signed S3 API on 3900, not website mode on
-3902. Website error-document substitution could not contribute to that observed
-presign-expiry failure; its 400 XML response was independent of website config.
+The zone has default `browser_cache_ttl 14400` and `cache_level aggressive`,
+never modified, and no cache rule. Media extensions are cached by default and
+the cache key includes the query string. A stable files URL cached at the edge
+would be served to a later request that never passed authz, because Cloudflare
+answers before Caddy.
 
-Compatibility survey, 2026-10-12: 290 existing keys, zero literal percent,
-trailing dot/space or empty/dot segments; one interior-space key. The exact key
-`cs7641/quizzes/sl-quiz/SL Unit Quiz_ CS7641_ Machine Learning - Fall 2026.pdf`
-is a regression fixture. Re-run the survey before tightening the predicate.
+Origin `private, no-store` on every object response is therefore load-bearing.
+Pre-deploy evidence on this zone is in the program report. The deploy is not
+accepted until the live check passes: an authorised GET and Range on the stable
+URL, then the identical URL with no session from the same colo, must yield the
+Authelia redirect or 403, never `CF-Cache-Status: HIT`, never object bytes.
 
-Headers are generated from one response policy for both normal and Caddy error
-handlers. HTTP-parser rejections before routing have only fixed server errors,
-never bucket bytes; they cannot inherit route headers.
+## Recorded negatives
 
-Parser controls on deployed Caddy 2.11.2 returned fixed 400 and 431 responses
-(103 and 143 bytes), never object bytes. These are generated before Caddy
-routing, so no-store, CSP and nosniff are absent there. The regression checks
-require no request/path reflection or server-version header.
+All ten `cs7641/audio/*.mp3` objects were `audio/mpeg` with byte ranges and the
+listed sizes, audited 2026-10-12 with legitimate SigV4 credentials. Metadata is
+not a contributing cause.
+
+The old delivery used the S3 API on 3900, not website mode on 3902, so website
+error-document substitution could not contribute to it.
+
+Compatibility survey, 2026-10-12: 290 keys, zero literal percent, trailing
+dot/space or empty/dot segments, one interior-space key. That exact key is a
+regression fixture. Re-run the survey before tightening the predicate.
+
+## Acceptance
+
+Verified in Chromium against Caddy 2.11.2 and Garage 1.3.1 on scratch, using the
+real audio bytes at 16 KB/s with the cache disabled: played past 125 seconds,
+seeked to about 2156 seconds, and the fresh Range at 127 seconds carried the
+cookie and returned 206.
