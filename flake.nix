@@ -304,18 +304,6 @@
               '';
             };
 
-            presignSeconds = lib.mkOption {
-              type = lib.types.int;
-              default = 120;
-              description = ''
-                Lifetime of the presigned URL the gateway redirects to.
-
-                That URL is a bearer capability until it expires, so this is
-                minutes rather than the seven days SigV4 would permit. The
-                gateway decides access; the presign only delivers bytes.
-              '';
-            };
-
             adminGroup = lib.mkOption {
               type = lib.types.str;
               default = "files-admin";
@@ -450,11 +438,7 @@
                 LISTER_REGION = cfg.region;
                 LISTER_TEMPLATE = listerTemplate;
                 LISTER_LISTEN = "socket";
-                # Presigned URLs must be followable from a browser, so they are
-                # signed against the PUBLIC S3 door rather than loopback.
-                LISTER_PUBLIC_ENDPOINT = "https://s3.${baseDomain}";
                 LISTER_ACL_DB = cfg.aclDatabase;
-                LISTER_PRESIGN_SECONDS = toString cfg.presignSeconds;
                 LISTER_ADMIN_GROUP = cfg.adminGroup;
                 AWS_EC2_METADATA_DISABLED = "true";
               };

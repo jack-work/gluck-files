@@ -4,8 +4,9 @@
 The ACL is real sqlite; only Garage is stubbed. The properties:
 
   a request without Remote-User is refused, not treated as anonymous
-  an object with no grant is 404, never 403, so the bucket is not an oracle
-  an object with a grant is a 302 to a short-lived presigned URL
+  a listing with no grant is 404, never 403, so the bucket is not an oracle
+  the catch-all never serves, redirects to or signs an object, grant or not:
+    objects belong to /_files/authz and Garage, tested in test_authz.py
   the acceptance case: dad reaches his own directory and nothing else
 """
 
@@ -28,7 +29,6 @@ os.environ["LISTER_TEMPLATE"] = os.path.join(_TMP, "tpl.html")
 os.environ["LISTER_BUCKETS"] = "files"
 os.environ["LISTER_ROOT_DOMAIN"] = ".kelliher.info"
 os.environ["LISTER_ACL_DB"] = os.path.join(_TMP, "acl.db")
-os.environ["LISTER_PRESIGN_SECONDS"] = "120"
 os.environ.setdefault("AWS_ACCESS_KEY_ID", "test")
 os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "test")
 os.environ.setdefault("AWS_EC2_METADATA_DISABLED", "true")
@@ -112,41 +112,23 @@ class Identity(Base):
     def test_a_forged_group_header_cannot_invent_a_grant(self):
         # Caddy strips client Remote-*; this only proves the app does not
         # trust a group name that holds no grant.
-        r = self.get("/wfh/Rental_Agreement.pdf", user="dad", groups="files-admin")
+        r = self.get("/wfh/", user="dad", groups="files-admin")
         self.assertEqual(r.status_code, 404)
 
 
 class Objects(Base):
-    def test_object_without_a_grant_is_404_not_403(self):
-        r = self.get("/wfh/Rental_Agreement.pdf")
-        self.assertEqual(r.status_code, 404)
-
-    def test_object_with_a_grant_redirects_to_a_presigned_url(self):
+    # The presign redirect this replaced handed the browser a bearer URL that
+    # the edge cached and replayed after expiry. Nothing here may mint one.
+    def test_a_granted_object_is_not_served_by_the_catch_all(self):
+        L.ACL.grant("group:files-admin", "", "read", "admin")
         self.grant_dad()
-        r = self.get("/dad/Mitchell-MachineLearning-1997.pdf")
-        self.assertEqual(r.status_code, 302)
-        loc = r.headers["Location"]
-        self.assertIn("X-Amz-Signature", loc)
-        self.assertIn("X-Amz-Expires=120", loc)
-        self.assertIn("Mitchell-MachineLearning-1997.pdf", loc)
-
-    def test_a_granted_but_absent_object_is_404(self):
-        self.grant_dad()
-        r = self.get("/dad/not-here.pdf")
-        self.assertEqual(r.status_code, 404)
-
-    def test_traversal_is_refused(self):
-        self.grant_dad()
-        for p in ("/dad/../wfh/Rental_Agreement.pdf", "/dad/%2e%2e/wfh/contacts.pdf"):
-            self.assertEqual(self.get(p).status_code, 404, p)
-
-    def test_sibling_prefix_does_not_inherit(self):
-        L.ACL.grant("user:dad", "dad/", "read", "admin")
-        OBJECTS["dadtaxes/secret.pdf"] = 10
-        try:
-            self.assertEqual(self.get("/dadtaxes/secret.pdf").status_code, 404)
-        finally:
-            del OBJECTS["dadtaxes/secret.pdf"]
+        for user, groups, path in [("dad", "", "/dad/Mitchell-MachineLearning-1997.pdf"),
+                                   ("admin", "files-admin", "/wfh/Rental_Agreement.pdf"),
+                                   ("dad", "", "/wfh/Rental_Agreement.pdf")]:
+            r = self.get(path, user=user, groups=groups)
+            self.assertEqual(r.status_code, 404, path)
+            self.assertNotIn("Location", r.headers)
+            self.assertNotIn(b"X-Amz-Signature", r.data)
 
 
 class Directories(Base):
@@ -190,27 +172,23 @@ class Directories(Base):
         finally:
             del OBJECTS["dad/<script>alert(1)</script>.pdf"]
 
-    def test_admin_can_read_a_private_document(self):
-        L.ACL.grant("group:files-admin", "", "read", "admin")
-        r = self.get("/wfh/Rental_Agreement.pdf", user="admin", groups="files-admin")
-        self.assertEqual(r.status_code, 302)
+    def test_admin_can_list_a_private_directory(self):
+        L.ACL.grant("group:files-admin", "", "list", "admin")
+        r = self.get("/wfh/", user="admin", groups="files-admin")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn(b"Rental_Agreement.pdf", r.data)
 
 
 class Acceptance(Base):
     def test_dad_reaches_his_directory_and_nothing_else(self):
         self.grant_dad()
-        allowed = ["/dad/", "/dad/Mitchell-MachineLearning-1997.pdf", "/dad/notes.txt"]
-        denied = [
-            "/wfh/",
-            "/wfh/Rental_Agreement.pdf",
-            "/wfh/contacts.pdf",
-            "/school/",
-            "/school/syllabus.pdf",
-        ]
-        for p in allowed:
-            self.assertIn(self.get(p).status_code, (200, 302), p)
-        for p in denied:
+        self.assertEqual(self.get("/dad/").status_code, 200)
+        for p in ["/wfh/", "/school/"]:
             self.assertEqual(self.get(p).status_code, 404, p)
+        for key in ["dad/Mitchell-MachineLearning-1997.pdf", "dad/notes.txt"]:
+            self.assertTrue(L.ACL.allows("dad", "", key, "read"), key)
+        for key in ["wfh/Rental_Agreement.pdf", "wfh/contacts.pdf", "school/syllabus.pdf"]:
+            self.assertFalse(L.ACL.allows("dad", "", key, "read"), key)
 
 
 class Admission(Base):
@@ -246,7 +224,6 @@ class Admission(Base):
 
     def test_an_empty_queue_serves_normally(self):
         self.assertEqual(self.get("/dad/").status_code, 200)
-        self.assertEqual(self.get("/dad/notes.txt").status_code, 302)
 
     def test_a_deep_queue_sheds_with_503_and_retry_after(self):
         self.fill_queue(L.MAX_QUEUE + 1)
@@ -277,7 +254,6 @@ class Admission(Base):
         self.assertEqual(self.get("/dad/").status_code, 503)
         self.drain_queue()
         self.assertEqual(self.get("/dad/").status_code, 200)
-        self.assertEqual(self.get("/dad/notes.txt").status_code, 302)
 
     def test_a_shed_reveals_nothing_about_the_path(self):
         # 503 is not a denial, so it must not become the oracle that the

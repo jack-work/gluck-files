@@ -113,6 +113,10 @@ class Authorisation(unittest.TestCase):
         L.ACL.grant('group:files-admin','','read','fixture')
         self.assertEqual(self.ask('/wfh/private.mp3',user='admin',**{'Remote-Groups':'files-admin'}).status_code,200)
 
+    def test_sibling_prefix_does_not_inherit(self):
+        self.assertEqual(self.ask('/dadtaxes/secret.mp3').status_code,403)
+        self.assertEqual(self.ask('/dad/../wfh/private.mp3').status_code,403)
+
     def test_unknown_bucket_is_denied(self):
         r=self.client.get('/_files/authz',base_url='http://graveyard.kelliher.info',headers={'Remote-User':'alice','X-Forwarded-Uri':'/dad/a.mp3','X-Forwarded-Method':'GET'})
         self.assertEqual(r.status_code,403)

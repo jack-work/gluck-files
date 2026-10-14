@@ -10,9 +10,10 @@ a policy is checked on the object path, and it is this file.
              client-supplied Remote-* first. A request without it is refused,
              not treated as anonymous.
   directory  needs `list` on the prefix
-  object     needs `read` on the key, then a SHORT-LIVED presigned URL and a
-             302. No bytes pass through this process.
-  denied     404, never 403, so the bucket's shape is not an oracle.
+  object     never served here. Caddy asks /_files/authz, which needs `read` on
+             the canonical key and answers without looking the object up, then
+             streams it from Garage. No bytes pass through this process.
+  denied     a listing is 404, never 403, so the bucket's shape is not an oracle.
 
 Admin is not a special case in code: `group:files-admin` holds read/list/write
 on the root, which inherits everywhere. One mechanism, one code path.
@@ -28,7 +29,7 @@ from urllib.parse import quote
 import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
-from flask import Flask, Response, abort, redirect, render_template_string, request
+from flask import Flask, Response, abort, render_template_string, request
 from markupsafe import escape
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -39,14 +40,10 @@ BUCKETS = frozenset(
 )
 ROOT_DOMAIN = os.environ.get("LISTER_ROOT_DOMAIN", "").lower()
 ENDPOINT = os.environ.get("LISTER_ENDPOINT", "http://127.0.0.1:3900")
-PUBLIC_ENDPOINT = os.environ.get("LISTER_PUBLIC_ENDPOINT", "")
 REGION = os.environ.get("LISTER_REGION", "spain")
 TEMPLATE = os.environ["LISTER_TEMPLATE"]
 MAX_KEYS = int(os.environ.get("LISTER_MAX_KEYS", "2000"))
 ACL_DB = os.environ.get("LISTER_ACL_DB", "/var/lib/gluck-files-lister/acl.db")
-# A presigned URL is a bearer capability until it expires. Minutes, not the
-# seven days SigV4 would allow.
-PRESIGN_SECONDS = int(os.environ.get("LISTER_PRESIGN_SECONDS", "120"))
 MAX_QUEUE = int(os.environ.get("LISTER_MAX_QUEUE", "8"))
 
 with open(TEMPLATE, encoding="utf-8") as fh:
@@ -77,20 +74,6 @@ s3 = boto3.client(
         read_timeout=15,
     ),
 )
-
-# A separate client whose generated URLs point at the public hostname, so a
-# redirect is followable from a browser. Same credentials, same signature.
-presigner = (
-    boto3.client(
-        "s3",
-        endpoint_url=PUBLIC_ENDPOINT,
-        region_name=REGION,
-        config=Config(signature_version="s3v4"),
-    )
-    if PUBLIC_ENDPOINT
-    else s3
-)
-
 
 def caller():
     """The authenticated user, or None. Absence is refusal, not anonymity."""
@@ -353,25 +336,9 @@ def serve(path):
     if is_dir and key and not key.endswith("/"):
         key += "/"
 
-    if is_dir:
-        return render(bucket, key, user, groups)
-
-    if not ACL.allows(user, groups, key, "read"):
-        log.info("denied read %s to %s", key, user)
+    if not is_dir:
         abort(404)
-
-    try:
-        s3.head_object(Bucket=bucket, Key=key)
-    except ClientError:
-        abort(404)
-
-    url = presigner.generate_presigned_url(
-        "get_object",
-        Params={"Bucket": bucket, "Key": key},
-        ExpiresIn=PRESIGN_SECONDS,
-    )
-    log.info("allowed read %s to %s", key, user)
-    return redirect(url, code=302)
+    return render(bucket, key, user, groups)
 
 
 @app.errorhandler(401)
