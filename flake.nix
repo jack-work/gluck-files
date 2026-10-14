@@ -15,6 +15,7 @@
         cp ${./lister/aclctl.py} $out/aclctl.py
       '';
 
+      mediaHeaders = import ./lib/media-headers.nix;
       nixosModule =
         { config, lib, pkgs, ... }:
         let
@@ -46,15 +47,11 @@
           websiteBuckets = [ cfg.bucket ];
           allBuckets = websiteBuckets ++ [ cfg.graveyardBucket ];
 
-          # Every request to the browser hostname goes to the gateway. There is
-          # no longer a path that reaches Garage's web endpoint directly, which
-          # is the whole point: a policy checked only on directory requests
-          # would govern the listing and nothing else.
-          browserPathConfig = ''
-            @bearer header Authorization Bearer*
-            respond @bearer 403
-            header Cache-Control "no-store"
-          '';
+          garageWeb = config.services.kelliher-web.sites.gluck-files.backendSockets.garage;
+          browserPathConfig = import ./lib/media-route.nix {
+            listerAddress = "unix//run/kweb/gluck-files.sock";
+            garageAddress = garageWeb.dial;
+          };
 
           # The retention vocabulary, declared ONCE. These strings name the
           # prefixes in the graveyard bucket AND supply the day counts of the
@@ -355,16 +352,6 @@
               '';
             };
 
-            webEndpoint = lib.mkOption {
-              type = lib.types.bool;
-              default = false;
-              description = ''
-                Run Garage's static web endpoint. It serves every object in the
-                website bucket to any local process with no credential, so it
-                stays off until something enforces access in front of it.
-              '';
-            };
-
             ports = {
               s3 = lib.mkOption {
                 type = lib.types.port;
@@ -375,11 +362,6 @@
                 type = lib.types.port;
                 default = 3901;
                 description = "Cluster RPC. Single node, so loopback only, and never through the firewall.";
-              };
-              web = lib.mkOption {
-                type = lib.types.port;
-                default = 3902;
-                description = "Static web endpoint, used only when webEndpoint is true.";
               };
               admin = lib.mkOption {
                 type = lib.types.port;
@@ -428,9 +410,8 @@
                 } // lib.optionalAttrs (cfg.adminTokenFile != null) {
                   admin_token_file = cfg.adminTokenFile;
                 };
-              } // lib.optionalAttrs cfg.webEndpoint {
                 s3_web = {
-                  bind_addr = "127.0.0.1:${toString cfg.ports.web}";
+                  bind_addr = garageWeb.bindPath;
                   root_domain = ".${lib.head config.services.kelliher-web.baseDomains}";
                   index = "index.html";
                 };
@@ -548,9 +529,13 @@
             services.kelliher-web.sites.gluck-files = {
               subdomains = [ "files" ];
               requireAuth = true;
+              trustsRemoteHeaders = true;
               requiredGroups = [ "files-admin" ];
               proxySocket = "gluck-files-lister.service";
+              backendSockets.garage = { service = "garage.service"; owner = "garage"; };
               extraConfig = browserPathConfig;
+              beforeAuthConfig = import ./lib/media-document-policy.nix;
+              responseHeaders = mediaHeaders;
             };
 
 
@@ -625,13 +610,16 @@
             # pipefail is load-bearing: without it the pipeline reports tee's
             # exit status and a failing test builds green.
             set -o pipefail
-            cp ${./lister}/*.py .
+            cp ${./lister}/test_*.py .
+            export PYTHONPATH=${listerSrcFor pkgs}
             export LISTER_ACL_DB=$PWD/acl-test.db
             ${py}/bin/python3 ${file} 2>&1 | tee $out
           '';
         in {
           acl = suite "acl" "test_acl.py";
           gateway = suite "gateway" "test_gateway.py";
+          authz = suite "authz" "test_authz.py";
+          viewer = suite "viewer" "test_viewer.py";
           bucket-for = suite "bucket-for" "test_lister.py";
 
           socket = pkgs.runCommand "gluck-files-socket" { } ''
@@ -639,6 +627,49 @@
             export LISTER_SRC=${listerSrcFor pkgs}
             export SOCKET_ACTIVATE=${pkgs.systemd}/bin/systemd-socket-activate
             ${py}/bin/python3 -u ${./lister/test_socket.py} 2>&1 | tee $out
+          '';
+
+          media-stack = pkgs.runCommand "gluck-files-media-stack" {
+            nativeBuildInputs = [ py pkgs.caddy pkgs.garage_1_x ];
+            LISTER_SRC = listerSrcFor pkgs;
+            MEDIA_CADDYFILE = pkgs.writeText "files-media-test-Caddyfile" ''
+              {
+                auto_https off
+                admin off
+              }
+              :28780 {
+                route {
+                  ${import ./lib/media-document-policy.nix}
+                  header {
+                    ${pkgs.lib.concatStringsSep "\n" (pkgs.lib.mapAttrsToList
+                      (name: value: ">${name} ${builtins.toJSON value}") mediaHeaders)}
+                  }
+                  request_header -Remote-User
+                  request_header -Remote-Groups
+                  request_header -Remote-Email
+                  request_header -Remote-Name
+                  forward_auth 127.0.0.1:28091 {
+                    uri /api/authz/forward-auth
+                    copy_headers Remote-User Remote-Groups Remote-Email Remote-Name
+                  }
+                  ${import ./lib/media-route.nix {
+                    listerAddress = "@LISTER@";
+                    garageAddress = "@GARAGE@";
+                  }}
+                  reverse_proxy @LISTER@
+                }
+                handle_errors {
+                  header {
+                    ${pkgs.lib.concatStringsSep "\n" (pkgs.lib.mapAttrsToList
+                      (name: value: ">${name} ${builtins.toJSON value}") mediaHeaders)}
+                  }
+                  respond "" {err.status_code}
+                }
+              }
+            '';
+          } ''
+            set -euo pipefail
+            python3 ${./lister/test_media_stack.py} 2>&1 | tee $out
           '';
 
           # What the module SHIPS, not what the tests assemble. The suites copy

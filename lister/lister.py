@@ -23,15 +23,16 @@ import os
 import socket
 import sys
 from datetime import timezone
+from urllib.parse import quote
 
 import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
-from flask import Flask, Response, abort, redirect, request
+from flask import Flask, Response, abort, redirect, render_template_string, request
 from markupsafe import escape
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from acl import Acl, BadPath, normalise
+from acl import Acl, BadPath, canonical_object_uri, normalise
 
 BUCKETS = frozenset(
     b for b in os.environ.get("LISTER_BUCKETS", "files").replace(",", " ").split() if b
@@ -166,6 +167,8 @@ def listing(bucket, prefix):
                 {
                     "name": key[len(prefix):],
                     "href": "/" + key,
+                    "viewer": ("/_files/view?uri=" + quote(quote("/" + key, safe="/"), safe=""))
+                              if key.lower().endswith((".mp3", ".mp4")) else None,
                     "size": human(obj.get("Size", 0)),
                     "bytes": obj.get("Size", 0),
                     "when": when(obj.get("LastModified")),
@@ -275,6 +278,55 @@ def refuse_when_overloaded():
         mimetype="text/plain",
         headers={"Retry-After": "2", "Cache-Control": "no-store"},
     )
+
+
+@app.get("/_files/view")
+def media_viewer():
+    user = caller()
+    if not user:
+        abort(401)
+    bucket = bucket_for(request.host)
+    if bucket is None:
+        abort(403)
+    try:
+        key, uri = canonical_object_uri(request.args.get("uri"))
+    except (BadPath, ValueError):
+        abort(403)
+    if not ACL.allows(user, caller_groups(), key, "read"):
+        abort(403)
+    try:
+        meta = s3.head_object(Bucket=bucket, Key=key)
+    except ClientError:
+        abort(404)
+    kind = {"audio/mpeg": "audio", "video/mp4": "video"}.get(meta.get("ContentType"))
+    return render_template_string(
+        "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'>"
+        "<title>{{ title }}</title><h1>{{ title }}</h1>"
+        "{% if kind == 'audio' %}<audio controls preload=metadata src=\"{{ uri }}\"></audio>"
+        "{% elif kind == 'video' %}<video controls preload=metadata src=\"{{ uri }}\"></video>{% endif %}"
+        "<p><a href=\"{{ uri }}\" download>Download</a></p>",
+        title=key.rsplit("/", 1)[-1], uri=uri, kind=kind,
+    )
+
+
+@app.get("/_files/authz")
+def authorise_object():
+    headers = {"Cache-Control": "no-store"}
+    user = caller()
+    if not user:
+        return Response("unauthenticated\n", status=401, headers=headers)
+    if bucket_for(request.host) is None:
+        return Response("denied\n", status=403, headers=headers)
+    if request.headers.get("X-Forwarded-Method") not in ("GET", "HEAD"):
+        return Response("denied\n", status=403, headers=headers)
+    try:
+        key, uri = canonical_object_uri(request.headers.get("X-Forwarded-Uri"))
+    except (BadPath, ValueError):
+        return Response("denied\n", status=403, headers=headers)
+    if not ACL.allows(user, caller_groups(), key, "read"):
+        return Response("denied\n", status=403, headers=headers)
+    headers["X-Files-URI"] = uri
+    return Response("", status=200, headers=headers)
 
 
 @app.route("/", defaults={"path": ""})
