@@ -5,7 +5,7 @@ description: Object authorization, same-origin streaming and the media viewer. R
 
 # Media delivery
 
-Status: implementation under review, not deployed.
+Status: deployed 2026-10-14, spain 79fb26b.
 
 | route | enforcement | bytes |
 |---|---|---|
@@ -95,10 +95,17 @@ would be served to a later request that never passed authz, because Cloudflare
 answers before Caddy.
 
 Origin `private, no-store` on every object response is therefore load-bearing.
-Pre-deploy evidence on this zone is in the program report. The deploy is not
-accepted until the live check passes: an authorised GET and Range on the stable
-URL, then the identical URL with no session from the same colo, must yield the
-Authelia redirect or 403, never `CF-Cache-Status: HIT`, never object bytes.
+Live gate, 2026-10-14, colo ATL throughout, with a scratch account granted one
+object: authorised GET 200 and Range 206 served; the same session on an object
+outside its grant 403; the identical URL with no session 401 to Authelia, no
+bytes; every response `BYPASS`, never `HIT`. One finding: Cloudflare rewrote the
+authorised 206 to `private, max-age=14400` while origin sent `private,
+no-store`. The zone's Browser Cache TTL lands on edge-served partial responses.
+The edge held nothing, but the authorised user's own browser could keep a slice.
+A Cloudflare cache rule for files and s3 (cache off, browser TTL respecting
+origin) fixed it: the rerun the same night served the 206 as `private, no-store`,
+every response `DYNAMIC`, never `HIT`. Origin headers alone were not enough;
+the rule is part of this route.
 
 Two traps, both measured on this zone 2026-10-13:
 

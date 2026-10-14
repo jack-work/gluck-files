@@ -36,28 +36,34 @@ because sound reasoning is what stops anyone from asking.
 
 ## The single enforcement point
 
-**Every** request to `files.kelliher.info` goes to the gateway on `9099`.
+**Every** request to `files.kelliher.info` is decided by the gateway, the
+lister, which listens only on `/run/kweb/gluck-files.sock`.
 
 ```
-Cloudflare -> Caddy -> strip Remote-* -> forward_auth (Authelia) -> gateway :9099
+Cloudflare -> Caddy -> strip Remote-* -> forward_auth (Authelia)
+  directory: -> lister (socket), list check
+  object:    -> forward_auth lister /_files/authz (socket), read check
+             -> Garage web on its Caddy-only socket, canonical key only
 ```
 
-Garage's web endpoint on `3902` is no longer reachable from any hostname.
-
-That matters more than it looks. Before this, Caddy routed trailing-slash
-requests to the lister and **everything else straight to Garage**, so no code
-saw an object request. An ACL table under that arrangement would have governed
-the listing and nothing else: a control that looks real and does nothing.
+Before this, Caddy routed trailing-slash requests to the lister and
+**everything else straight to Garage**, so no code saw an object request. An ACL
+table under that arrangement would have governed the listing and nothing else: a
+control that looks real and does nothing. Now no object byte leaves Garage
+without a read check on that exact request. See [`MEDIA.md`](./MEDIA.md).
 
 | request | needs | result |
 |---|---|---|
 | `/` or any path ending `/` | `list` on the prefix | a listing, or 404 |
-| any other path | `read` on the key | **302** to a short-lived presigned URL |
+| any other path | `read` on the canonical key, every request, every Range | Caddy streams it from Garage |
 | no `Remote-User` | — | **401** |
-| anything denied | — | **404**, never 403 |
+| a listing denied | — | **404**, never 403 |
+| an object denied | — | **403**, decided without looking the object up |
 
-404 rather than 403 because 403 confirms a path exists. The bucket's shape is not
-an oracle. That is the same rule `kstack` states for unreadable items.
+A denied listing is 404 because 403 would confirm the path exists. A denied
+object is 403 from the ACL alone: the authorizer never asks Garage, so the answer
+is the same whether or not the object exists and the bucket's shape is still not
+an oracle.
 
 ## Identity
 
@@ -113,25 +119,13 @@ Without `list` on `/`, a caller who holds grants beneath it gets a listing of
 just those subtrees rather than a 404. It reveals only paths already granted to
 them, and it keeps a legitimate user off a dead end.
 
-## Delivery: presign and redirect
+## Delivery
 
-The gateway decides access; the presigned URL only delivers bytes.
-
-| | |
-|---|---|
-| expiry | **120 seconds** by default, not the seven days SigV4 permits |
-| signed against | `https://s3.kelliher.info`, so a browser can follow the redirect |
-| bytes through python | none |
-
-A presigned URL is a bearer capability until it expires. That is a real cost, and
-the mitigation is that it is short and single-purpose rather than that it is
-secret.
-
-**Streaming was considered and rejected.** Pushing 60 MB through a Python process
-on the house router is work the router should not do, and it walks into
-Cloudflare's ~100 s origin limit, which nobody on this estate has measured. The
-procedure is filed and unrun at `~/dev/rou2/docs/cloudflare-streaming.md`. An
-unmeasured limit is not a design input.
+Caddy streams the object from Garage after the authorizer answers. Bytes never
+pass through Python, and the browser never holds a capability URL: the presigned
+302 this replaced was cached at the edge and replayable after expiry. Every
+bucket response is attachment, `private, no-store`, nosniff and sandboxed.
+Details and the edge-cache evidence: [`MEDIA.md`](./MEDIA.md).
 
 ## The admin CLI
 

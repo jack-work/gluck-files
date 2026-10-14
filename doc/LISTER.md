@@ -19,9 +19,10 @@ with no error anywhere. Listing at request time cannot drift.
 ## There is no longer a split
 
 This document used to describe Caddy routing trailing-slash requests to the
-lister and everything else straight to Garage. **That split is gone.** Every
-request to `files.kelliher.info` now goes to the gateway, because a policy
-checked only on directory requests would govern the listing and nothing else.
+lister and everything else straight to Garage, unchecked. **That split is gone.**
+Directory requests go to the gateway's listing; object requests go to the
+gateway's `/_files/authz` and only then to Garage, because a policy checked only
+on directory requests would govern the listing and nothing else.
 
 See [`ACL.md`](./ACL.md) for what the gateway decides and how. What remains here
 is listing mechanics and the bucket's own key.
@@ -31,8 +32,8 @@ Consequences worth keeping:
 - Directory listings are computed at request time, so they cannot drift. A
   generated `index.html` is accurate when written and wrong the next time
   anything is uploaded, and the failure is silent.
-- No object bytes pass through python. The gateway redirects to a short-lived
-  presigned URL and Garage serves the data.
+- No object bytes pass through python. The gateway approves each object request
+  and Caddy streams it from Garage; see [`MEDIA.md`](./MEDIA.md).
 
 ## Auth
 
@@ -64,8 +65,8 @@ Host: files.kelliher.info  /wfh/Rental_Agreement.pdf -> 200
 Host: localhost            /wfh/Rental_Agreement.pdf -> 404
 ```
 
-The route now terminates at the gateway instead, but the `Host` behaviour it
-relies on is the same and was measured, not inferred.
+The gateway and its authorizer rely on the same `Host` behaviour, which was
+measured, not inferred.
 
 | `Host` | bucket |
 |---|---|

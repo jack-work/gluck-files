@@ -138,13 +138,16 @@ hush files s3 cp draft.pdf s3://graveyard/7d/
 ## Browsing
 
 `files.kelliher.info/<path>` serves an object **if your ACL permits it**, behind
-Authelia. Every request goes through the gateway: directory requests need `list`
-on the prefix, objects need `read` on the key, and anything denied is a 404 so
-the bucket's shape is not an oracle.
+Authelia. Directory requests need `list` on the prefix and are 404 when denied,
+so the bucket's shape is not an oracle. Every object request, every Range
+included, needs `read` on the key, checked by the gateway's `/_files/authz`
+without looking the object up, and is 403 when denied.
 
-Objects arrive as a **302 to a short-lived presigned URL**, so no bytes pass
-through Python. Directory listings are computed per request; Garage itself has no
-autoindex.
+Caddy streams approved objects from Garage, so no bytes pass through Python and
+the browser never holds a capability URL. Objects download rather than render;
+audio, video and images play in the viewer at `/_files/view?uri=`. Directory
+listings are computed per request; Garage itself has no autoindex. See
+[`doc/MEDIA.md`](./doc/MEDIA.md).
 
 See [`doc/ACL.md`](./doc/ACL.md) for the model and the admin CLI, and
 [`doc/LISTER.md`](./doc/LISTER.md) for how the bucket is resolved from `Host`.
@@ -170,11 +173,12 @@ bucket as a convenience copy, not a backup.
 
 ## Ports
 
-All loopback. Only Caddy reaches them; RPC never leaves the box.
+All loopback; RPC never leaves the box. Garage's web endpoint has no port: it
+listens on `/run/kweb-gluck-files-garage/sock`, a directory only Garage and Caddy
+can enter, and Caddy reaches it only after the gateway approves a request.
 
 | 3900 | S3 API | fronted at `s3.kelliher.info` |
 | 3901 | RPC | single node, never through the firewall |
-| 3902 | web | fronted at `files.kelliher.info` |
 | 3903 | admin | never proxied |
 
 ## Rollback
@@ -185,8 +189,8 @@ is one commit and a deploy, with the data still on disk because we never
 deleted it.
 
 The old Caddy block could not be left in place, tempting as it sounds: it
-matched `files.kelliher.info`, which the web endpoint now owns, and two blocks
-cannot hold one hostname.
+matched `files.kelliher.info`, which the gateway now owns, and two blocks cannot
+hold one hostname.
 
 Delete the directory in a deliberate change once the bucket has carried real
 traffic, not as a side effect of this one.
