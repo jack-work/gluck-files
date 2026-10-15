@@ -144,8 +144,9 @@ included, needs `read` on the key, checked by the gateway's `/_files/authz`
 without looking the object up, and is 403 when denied.
 
 Caddy streams approved objects from Garage, so no bytes pass through Python and
-the browser never holds a capability URL. Objects download rather than render;
-audio, video and images play in the viewer at `/_files/view?uri=`. Directory
+the browser never holds a capability URL. Objects open inline under a CSP
+sandbox (HTML renders with scripts blocked); audio and video open in the player
+at `/_files/view?uri=`, where an object link opened directly is redirected. Directory
 listings are computed per request; Garage itself has no autoindex. See
 [`doc/MEDIA.md`](./doc/MEDIA.md).
 

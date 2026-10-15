@@ -124,7 +124,7 @@ them, and it keeps a legitimate user off a dead end.
 Caddy streams the object from Garage after the authorizer answers. Bytes never
 pass through Python, and the browser never holds a capability URL: the presigned
 302 this replaced was cached at the edge and replayable after expiry. Every
-bucket response is attachment, `private, no-store`, nosniff and sandboxed.
+bucket response is `private, no-store`, nosniff and sandboxed.
 Details and the edge-cache evidence: [`MEDIA.md`](./MEDIA.md).
 
 ## The admin CLI

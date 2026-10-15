@@ -69,22 +69,31 @@ Content-Range, so a 416 still reports the total size.
 
 | response | policy |
 |---|---|
-| every bucket byte, success, partial, 304, error | `Content-Disposition: attachment`, `private, no-store`, nosniff, CSP `sandbox` with `default-src 'none'` and same-origin media/img |
+| every bucket byte, success, partial, 304, error | Garage's Content-Type, no Content-Disposition, `private, no-store`, nosniff, CSP `sandbox` with `default-src 'none'` and same-origin media/img |
+| a page load (`Sec-Fetch-Dest: document`) of an audio or video key the caller may read | 303 from `/_files/authz` to `/_files/view?uri=`, no bytes; `?download=1` opts out |
 | viewer and listing HTML | app-owned templates, autoescaped; CSP with `script-src 'none'`, `object-src 'none'`, no sandbox |
 | Caddy transport errors | same policy, generated from the same map by `handle_errors` |
 | raw HTTP parser rejects (400, 431) | fixed text before routing. Route headers cannot exist there; tests require no request echo and no server version |
 
-The media element loads the object as a same-origin subresource of the trusted
-viewer, so its Range requests carry the Lax session cookie. Attachment and the
-sandbox directive govern navigation, not subresource loads; both were verified
-in Chromium rather than assumed. Unsupported types get the viewer page with a
-plain download link. A direct link to any object downloads rather than renders,
-deliberately.
+Objects open inline. The sandbox is what makes that safe: an HTML note renders
+with its scripts blocked under an opaque origin, nosniff stops a mislabelled
+object becoming a document, and images and PDFs render in the browser's own
+viewer. Measured in Chromium 2026-10-14: image, PDF (Chrome's viewer loads under
+the sandbox) and HTML (script blocked) inline; and on the live edge with a
+scratch login.
 
-A sandboxed media document was tried first. Its opaque origin dropped the
-session cookie on later Range requests, which returned 401. Adding
-`allow-same-origin` without `allow-scripts` was attempted and NOT established
-either way; it is neither proven nor a dead end.
+Audio and video cannot play from a direct page load. The sandbox gives that
+media document an opaque origin, so the player's Range requests are cross-site
+and go out without the Lax session cookie, and are sent to log in. Seen on
+Gluck's iPhone 2026-10-14 (navigation with cookie 200, then `bytes=0-1` with no
+cookie 302) and reproduced in Chromium. So a page load of an audio or video key
+is redirected to the viewer, whose media element loads the object as a
+same-origin subresource: its Range requests carry the cookie, verified in
+Chromium with a seek. The viewer plays the types in `PLAYER_TYPES`; anything
+else gets a plain download link.
+
+Adding `allow-same-origin` without `allow-scripts` was attempted for the direct
+case and NOT established either way; it is neither proven nor a dead end.
 
 ## Edge cache
 
