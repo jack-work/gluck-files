@@ -219,7 +219,8 @@ api_bind_addr = "127.0.0.1:28393"
         self.assertEqual(status, 206)
         self.assertEqual(h['content-range'], f'bytes 6000-6999/{len(self.data)}')
         self.assertEqual(body, self.data[6000:7000])
-        self.assertEqual(h['content-disposition'], 'attachment')
+        self.assertNotIn('content-disposition', h)
+        self.assertEqual(h['content-type'], 'video/mp4')
         self.safe_headers(h)
         status, h, body = self.get('/dad/movie.mp4', method='HEAD')
         self.assertEqual(status, 200)
@@ -297,10 +298,11 @@ api_bind_addr = "127.0.0.1:28393"
         self.assertNotIn(b'PRIVATE_INDEX',result[2])
 
     def test_08_active_content_and_conditional_responses(self):
-        for path in ['/dad/page.html','/dad/image.svg','/dad/fake.bin']:
+        for path, kind in [('/dad/page.html','text/html'),('/dad/image.svg','image/svg+xml'),('/dad/fake.bin','application/octet-stream')]:
             status,h,body=self.get(path)
             self.assertEqual(status,200)
-            self.assertEqual(h['content-disposition'],'attachment')
+            self.assertNotIn('content-disposition',h)
+            self.assertEqual(h['content-type'],kind)
             self.safe_headers(h)
         _,h,_=self.get('/dad/movie.mp4')
         status,h,body=self.get('/dad/movie.mp4',headers={'If-None-Match':h['etag']})
@@ -410,6 +412,21 @@ api_bind_addr = "127.0.0.1:28393"
     def test_16_garage_web_socket_mode_controls_nothing_so_its_directory_must(self):
         self.assertEqual(stat.S_IMODE(WEB_SOCKET.stat().st_mode), 0o222)
         self.assertEqual(stat.S_IMODE(WEB_SOCKET.parent.stat().st_mode), 0o750)
+
+    def test_17_a_page_load_of_a_video_lands_in_the_viewer(self):
+        status,h,body=self.get('/dad/movie.mp4',headers={'Sec-Fetch-Dest':'document'})
+        self.assertEqual(status,303)
+        self.assertEqual(h['location'],'/_files/view?uri=%2Fdad%2Fmovie.mp4')
+        self.assertNotIn(self.data[:64],body)
+        self.safe_headers(h)
+        status,h,body=self.get('/dad/movie.mp4',headers={'Sec-Fetch-Dest':'video','Range':'bytes=0-99'})
+        self.assertEqual(status,206)
+        self.assertEqual(body,self.data[:100])
+        status,h,body=self.get('/dad/page.html',headers={'Sec-Fetch-Dest':'document'})
+        self.assertEqual(status,200)
+        self.assertEqual(h['content-type'],'text/html')
+        self.assertNotIn('content-disposition',h)
+        self.denied(self.get('/wfh/private.mp4',headers={'Sec-Fetch-Dest':'document'}))
 
     def test_98_first_auth_transport_error_has_policy(self):
         self.auth.shutdown()

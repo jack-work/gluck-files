@@ -150,8 +150,7 @@ def listing(bucket, prefix):
                 {
                     "name": key[len(prefix):],
                     "href": "/" + key,
-                    "viewer": ("/_files/view?uri=" + quote(quote("/" + key, safe="/"), safe=""))
-                              if key.lower().endswith((".mp3", ".mp4")) else None,
+                    "viewer": viewer_href(quote("/" + key, safe="/")) if plays_in_viewer(key) else None,
                     "size": human(obj.get("Size", 0)),
                     "bytes": obj.get("Size", 0),
                     "when": when(obj.get("LastModified")),
@@ -170,6 +169,23 @@ def listing(bucket, prefix):
     dirs.sort(key=lambda d: d["name"].lower())
     files.sort(key=lambda f: f["name"].lower())
     return dirs, files, truncated, len(dirs) + len(files)
+
+
+PLAYER_EXTENSIONS = (".mp3", ".m4a", ".aac", ".wav", ".oga", ".ogg", ".opus", ".flac",
+                     ".mp4", ".m4v", ".mov", ".webm", ".ogv")
+
+
+PLAYER_TYPES = {t: t.split("/", 1)[0] for t in (
+    "audio/mpeg", "audio/mp4", "audio/aac", "audio/wav", "audio/x-wav", "audio/ogg", "audio/opus",
+    "audio/flac", "video/mp4", "video/x-m4v", "video/quicktime", "video/webm", "video/ogg")}
+
+
+def plays_in_viewer(key):
+    return key.lower().endswith(PLAYER_EXTENSIONS)
+
+
+def viewer_href(uri):
+    return "/_files/view?uri=" + quote(uri, safe="")
 
 
 def granted_subtrees(user, groups, prefix):
@@ -281,13 +297,13 @@ def media_viewer():
         meta = s3.head_object(Bucket=bucket, Key=key)
     except ClientError:
         abort(404)
-    kind = {"audio/mpeg": "audio", "video/mp4": "video"}.get(meta.get("ContentType"))
+    kind = PLAYER_TYPES.get(meta.get("ContentType"))
     return render_template_string(
         "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'>"
         "<title>{{ title }}</title><h1>{{ title }}</h1>"
         "{% if kind == 'audio' %}<audio controls preload=metadata src=\"{{ uri }}\"></audio>"
         "{% elif kind == 'video' %}<video controls preload=metadata src=\"{{ uri }}\"></video>{% endif %}"
-        "<p><a href=\"{{ uri }}\" download>Download</a></p>",
+        "<p><a href=\"{{ uri }}?download=1\" download>Download</a></p>",
         title=key.rsplit("/", 1)[-1], uri=uri, kind=kind,
     )
 
@@ -308,6 +324,10 @@ def authorise_object():
         return Response("denied\n", status=403, headers=headers)
     if not ACL.allows(user, caller_groups(), key, "read"):
         return Response("denied\n", status=403, headers=headers)
+    if (request.headers.get("Sec-Fetch-Dest") == "document" and plays_in_viewer(key)
+            and "download=1" not in request.headers.get("X-Forwarded-Uri", "").partition("?")[2].split("&")):
+        headers["Location"] = viewer_href(uri)
+        return Response("", status=303, headers=headers)
     headers["X-Files-URI"] = uri
     return Response("", status=200, headers=headers)
 

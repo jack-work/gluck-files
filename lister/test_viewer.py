@@ -30,13 +30,24 @@ class Viewer(Base):
         self.grant_dad()
         original=L.s3.head_object
         try:
-            for mime in ['text/html','image/svg+xml','application/pdf','audio/mpeg; text/html','audio/ogg']:
+            for mime in ['text/html','image/svg+xml','application/pdf','audio/mpeg; text/html','audio/x-unknown','video/mp4 ']:
                 L.s3.head_object=Mock(return_value={'ContentType':mime})
                 r=self.get('/_files/view?uri=%2Fdad%2Fx.mp3')
                 self.assertEqual(r.status_code,200,mime)
                 self.assertNotIn(b'<audio',r.data)
                 self.assertNotIn(b'<video',r.data)
-                self.assertIn(b'download>Download</a>',r.data)
+                self.assertIn(b'?download=1" download>Download</a>',r.data)
+        finally:L.s3.head_object=original
+
+    def test_every_player_type_gets_a_player(self):
+        self.grant_dad()
+        original=L.s3.head_object
+        try:
+            for mime, tag in [('audio/ogg',b'<audio controls'),('video/webm',b'<video controls'),('video/quicktime',b'<video controls')]:
+                L.s3.head_object=Mock(return_value={'ContentType':mime})
+                r=self.get('/_files/view?uri=%2Fdad%2Fnotes.mp3')
+                self.assertEqual(r.status_code,200,mime)
+                self.assertIn(tag,r.data,mime)
         finally:L.s3.head_object=original
 
     def test_hostile_title_and_src_are_escaped(self):

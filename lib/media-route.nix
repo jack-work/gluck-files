@@ -47,7 +47,6 @@
           respond "" {rp.status_code}
         }
         handle_response {
-          header >Content-Disposition attachment
           copy_response
         }
       }

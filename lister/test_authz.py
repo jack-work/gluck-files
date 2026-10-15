@@ -117,6 +117,27 @@ class Authorisation(unittest.TestCase):
         self.assertEqual(self.ask('/dadtaxes/secret.mp3').status_code,403)
         self.assertEqual(self.ask('/dad/../wfh/private.mp3').status_code,403)
 
+    def test_a_page_load_of_audio_or_video_goes_to_the_viewer(self):
+        for uri, loc in [('/dad/a.mp3','/_files/view?uri=%2Fdad%2Fa.mp3'),('/dad/a%20b.MOV','/_files/view?uri=%2Fdad%2Fa%2520b.MOV')]:
+            r=self.ask(uri,**{'Sec-Fetch-Dest':'document'})
+            self.assertEqual(r.status_code,303,uri)
+            self.assertEqual(r.headers['Location'],loc)
+            self.assertNotIn('X-Files-URI',r.headers)
+            self.assertEqual(r.headers['Cache-Control'],'no-store')
+
+    def test_the_player_and_downloads_get_the_object(self):
+        for uri, dest in [('/dad/a.mp3','video'),('/dad/a.mp3','audio'),('/dad/a.mp3',None),
+                          ('/dad/a.mp3?download=1','document'),('/dad/a.pdf','document'),('/dad/a.html','document')]:
+            extra={'Sec-Fetch-Dest':dest} if dest else {}
+            r=self.ask(uri,**extra)
+            self.assertEqual(r.status_code,200,(uri,dest))
+            self.assertIn('X-Files-URI',r.headers)
+
+    def test_a_page_load_without_read_is_still_denied(self):
+        r=self.ask('/wfh/private.mp3',**{'Sec-Fetch-Dest':'document'})
+        self.assertEqual(r.status_code,403)
+        self.assertNotIn('Location',r.headers)
+
     def test_unknown_bucket_is_denied(self):
         r=self.client.get('/_files/authz',base_url='http://graveyard.kelliher.info',headers={'Remote-User':'alice','X-Forwarded-Uri':'/dad/a.mp3','X-Forwarded-Method':'GET'})
         self.assertEqual(r.status_code,403)
