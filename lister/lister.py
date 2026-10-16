@@ -203,6 +203,14 @@ def granted_subtrees(user, groups, prefix):
     return sorted(set(out))
 
 
+SCHEMES = {"light", "dark"}
+
+
+def reader_scheme():
+    scheme = request.cookies.get("zanni-scheme")
+    return scheme if scheme in SCHEMES else None
+
+
 def render(bucket, prefix, user, groups):
     may_list = ACL.allows(user, groups, prefix, "list")
 
@@ -226,6 +234,7 @@ def render(bucket, prefix, user, groups):
 
     name = [p for p in prefix.split("/") if p]
     return PAGE_TEMPLATE.render(
+        scheme=reader_scheme(),
         title=("/" + prefix if prefix else bucket) + " \u00b7 kelliher.info",
         heading=name[-1] if name else bucket,
         crumbs=crumbs_for(prefix),
@@ -299,13 +308,16 @@ def media_viewer():
         abort(404)
     kind = PLAYER_TYPES.get(meta.get("ContentType"))
     return render_template_string(
-        "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'>"
+        "<!doctype html><html{% if scheme %} data-scheme=\"{{ scheme }}\"{% endif %}>"
+        "<meta charset=utf-8><meta name=viewport content='width=device-width'>"
+        "<meta name=color-scheme content='light dark'>"
+        "<style>:root[data-scheme=light]{color-scheme:light}:root[data-scheme=dark]{color-scheme:dark}</style>"
         "<title>{{ title }}</title><h1>{{ title }}</h1>"
         "{% if kind == 'audio' %}<audio controls preload=metadata src=\"{{ uri }}\"></audio>"
         "{% elif kind == 'video' %}<video controls preload=metadata src=\"{{ uri }}\"></video>{% endif %}"
         "<p><a href=\"{{ uri }}?download=1\" download>Download</a></p>",
-        title=key.rsplit("/", 1)[-1], uri=uri, kind=kind,
-    )
+        title=key.rsplit("/", 1)[-1], uri=uri, kind=kind, scheme=reader_scheme(),
+    ), {"Vary": "Cookie"}
 
 
 @app.get("/_files/authz")
@@ -358,7 +370,7 @@ def serve(path):
 
     if not is_dir:
         abort(404)
-    return render(bucket, key, user, groups)
+    return render(bucket, key, user, groups), {"Vary": "Cookie"}
 
 
 @app.errorhandler(401)

@@ -15,6 +15,15 @@
         cp ${./lister/aclctl.py} $out/aclctl.py
       '';
 
+      # doc/LISTER.md
+      listerTemplateFor = pkgs: pkgs.runCommand "gluck-files-lister-template.html" {
+        nativeBuildInputs = [ zanni.packages.${pkgs.system}.default ];
+      } ''
+        zanni-inline -c boil -c gesso -c fontpack \
+          ${./lister/template.html.in} -o $out
+        zanni-check $out
+      '';
+
       mediaHeaders = import ./lib/media-headers.nix;
       nixosModule =
         { config, lib, pkgs, ... }:
@@ -84,14 +93,7 @@
 
           lifecycleFile = pkgs.writeText "gluck-files-lifecycle.json" lifecycleJson;
 
-          # doc/LISTER.md
-          listerTemplate = pkgs.runCommand "gluck-files-lister-template.html" {
-            nativeBuildInputs = [ zanni.packages.${pkgs.system}.default ];
-          } ''
-            zanni-inline -c boil -c gesso -c fontpack \
-              ${./lister/template.html.in} -o $out
-            zanni-check $out
-          '';
+          listerTemplate = listerTemplateFor pkgs;
 
           bootstrap = pkgs.writeShellApplication {
             name = "gluck-files-bootstrap";
@@ -605,6 +607,7 @@
           authz = suite "authz" "test_authz.py";
           viewer = suite "viewer" "test_viewer.py";
           bucket-for = suite "bucket-for" "test_lister.py";
+          scheme = (suite "scheme" "test_scheme.py").overrideAttrs { LISTER_TEMPLATE_BUILT = listerTemplateFor pkgs; };
 
           socket = pkgs.runCommand "gluck-files-socket" { } ''
             set -o pipefail

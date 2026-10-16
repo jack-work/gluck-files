@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en"{% if scheme %} data-scheme="{{ scheme }}"{% endif %}>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,6 +7,12 @@
 <link rel="icon" href="data:,">
 <!-- zanni:fontpack -->
 <style>
+  :root {
+    color-scheme: light dark;
+    --files-sheet: light-dark(var(--paper), var(--stage-2));
+    --files-muted: light-dark(var(--muted), var(--stage-muted));
+  }
+
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   body {
@@ -25,10 +31,10 @@
     margin-bottom: 4px;
     word-break: break-all;
   }
-  .crumbs a { color: var(--oxblood); text-decoration: none; }
+  .crumbs a { color: var(--z-accent); text-decoration: none; }
   .crumbs a:hover { text-decoration: underline; }
   .crumbs .sep { color: var(--gold); margin: 0 6px; }
-  .crumbs .here { color: var(--ink); }
+  .crumbs .here { color: var(--z-ink); }
 
   h1 {
     font-family: var(--fontpack-display);
@@ -41,13 +47,13 @@
   .tally {
     font-family: var(--fontpack-mono);
     font-size: 16px;
-    color: var(--muted);
+    color: var(--files-muted);
     margin-bottom: 22px;
   }
 
   .sheet {
     border: 3px solid var(--gold);
-    background: var(--paper);
+    background: var(--files-sheet);
   }
 
   table { width: 100%; border-collapse: collapse; }
@@ -58,7 +64,7 @@
     letter-spacing: 0.1em;
     text-transform: uppercase;
     text-align: left;
-    color: var(--muted);
+    color: var(--files-muted);
     padding: 10px 16px;
     border-bottom: 2px solid rgba(162, 118, 42, 0.5);
   }
@@ -79,21 +85,21 @@
     padding-right: 0;
   }
 
-  .name a { color: var(--ink); text-decoration: none; word-break: break-all; }
-  .name a:hover { color: var(--oxblood); text-decoration: underline; }
-  .name .dir { color: var(--oxblood); }
+  .name a { color: var(--z-ink); text-decoration: none; word-break: break-all; }
+  .name a:hover { color: var(--z-accent); text-decoration: underline; }
+  .name .dir { color: var(--z-accent); }
 
   td.size, td.when {
     font-family: var(--fontpack-mono);
     font-size: 15px;
-    color: var(--muted);
+    color: var(--files-muted);
     white-space: nowrap;
   }
   td.size { text-align: right; }
 
   .empty {
     font-style: italic;
-    color: var(--muted);
+    color: var(--files-muted);
     padding: 26px 16px;
   }
 
@@ -101,9 +107,9 @@
     margin-top: 20px;
     font-family: var(--fontpack-mono);
     font-size: 15px;
-    color: var(--muted);
+    color: var(--files-muted);
   }
-  footer a { color: var(--oxblood); }
+  footer a { color: var(--z-accent); }
 
   @media (max-width: 620px) {
     body { font-size: 17px; padding: 20px 12px 40px; }
