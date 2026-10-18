@@ -93,6 +93,38 @@ def canonical_object_uri(uri):
     return key, quote("/" + key, safe="/")
 
 
+MEDIA_REV = re.compile(r"^[0-9a-f]{12}$")
+MEDIA_FILE = re.compile(r"^[A-Za-z0-9_-]+\.(m3u8|m4s|mp4)$")
+
+
+def media_request(uri, method):
+    path = urlsplit(uri or "").path
+    if path.startswith("/_media/r/"):
+        if method not in ("GET", "HEAD"):
+            raise BadPath("method")
+        key, echo = canonical_object_uri(uri[len("/_media/r"):])
+        parts = key.split("/")
+        if len(parts) < 3 or not MEDIA_REV.match(parts[-2]) or not MEDIA_FILE.match(parts[-1]):
+            raise BadPath("not a rendition")
+        return "read", "/".join(parts[:-2]), echo
+    if path.startswith("/_media/api/item/"):
+        if method not in ("GET", "HEAD", "PUT"):
+            raise BadPath("method")
+        key, echo = canonical_object_uri(uri[len("/_media/api/item"):])
+        return "read", key, echo
+    if path.startswith("/_media/api/lib/"):
+        if method not in ("GET", "HEAD"):
+            raise BadPath("method")
+        rest = path[len("/_media/api/lib"):]
+        if rest == "/":
+            return "list", "", "/"
+        if not rest.endswith("/"):
+            raise BadPath("a library is a prefix")
+        key, echo = canonical_object_uri(rest[:-1])
+        return "list", key + "/", echo + "/"
+    raise BadPath("not a media route")
+
+
 def ancestors(path):
     """`a/b/c.pdf` -> ['', 'a/', 'a/b/', 'a/b/c.pdf'] — every prefix that could
     carry an inherited grant, root first."""

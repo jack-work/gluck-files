@@ -117,6 +117,13 @@ class Authorisation(unittest.TestCase):
         self.assertEqual(self.ask('/dadtaxes/secret.mp3').status_code,403)
         self.assertEqual(self.ask('/dad/../wfh/private.mp3').status_code,403)
 
+    def test_media_routes_are_closed_when_media_is_off(self):
+        self.assertFalse(L.MEDIA)
+        for uri in ('/_media/r/dad/a.mp3/0123456789ab/master.m3u8','/_media/api/item/dad/a.mp3'):
+            r=self.ask(uri)
+            self.assertEqual(r.status_code,403,uri)
+            self.assertNotIn('X-Files-URI',r.headers)
+
     def test_a_page_load_of_audio_or_video_goes_to_the_viewer(self):
         for uri, loc in [('/dad/a.mp3','/_files/view?uri=%2Fdad%2Fa.mp3'),('/dad/a%20b.MOV','/_files/view?uri=%2Fdad%2Fa%2520b.MOV')]:
             r=self.ask(uri,**{'Sec-Fetch-Dest':'document'})

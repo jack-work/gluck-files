@@ -33,7 +33,7 @@ from flask import Flask, Response, abort, render_template_string, request
 from markupsafe import escape
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from acl import Acl, BadPath, canonical_object_uri, normalise
+from acl import Acl, BadPath, canonical_object_uri, media_request, normalise
 
 BUCKETS = frozenset(
     b for b in os.environ.get("LISTER_BUCKETS", "files").replace(",", " ").split() if b
@@ -45,6 +45,8 @@ TEMPLATE = os.environ["LISTER_TEMPLATE"]
 MAX_KEYS = int(os.environ.get("LISTER_MAX_KEYS", "2000"))
 ACL_DB = os.environ.get("LISTER_ACL_DB", "/var/lib/gluck-files-lister/acl.db")
 MAX_QUEUE = int(os.environ.get("LISTER_MAX_QUEUE", "8"))
+MEDIA = os.environ.get("LISTER_MEDIA") == "1"
+MEDIA_PLAYER_EXTENSIONS = (".mp3", ".m4a", ".m4b", ".aac", ".wav", ".oga", ".ogg", ".opus", ".flac")
 
 with open(TEMPLATE, encoding="utf-8") as fh:
     PAGE = fh.read()
@@ -185,6 +187,8 @@ def plays_in_viewer(key):
 
 
 def viewer_href(uri):
+    if MEDIA and uri.lower().endswith(MEDIA_PLAYER_EXTENSIONS):
+        return "/_media/play" + uri
     return "/_files/view?uri=" + quote(uri, safe="")
 
 
@@ -328,6 +332,9 @@ def authorise_object():
         return Response("unauthenticated\n", status=401, headers=headers)
     if bucket_for(request.host) is None:
         return Response("denied\n", status=403, headers=headers)
+    forwarded = request.headers.get("X-Forwarded-Uri") or ""
+    if forwarded.startswith("/_media/"):
+        return authorise_media(user, forwarded, headers)
     if request.headers.get("X-Forwarded-Method") not in ("GET", "HEAD"):
         return Response("denied\n", status=403, headers=headers)
     try:
@@ -341,6 +348,19 @@ def authorise_object():
         headers["Location"] = viewer_href(uri)
         return Response("", status=303, headers=headers)
     headers["X-Files-URI"] = uri
+    return Response("", status=200, headers=headers)
+
+
+def authorise_media(user, forwarded, headers):
+    if not MEDIA:
+        return Response("denied\n", status=403, headers=headers)
+    try:
+        perm, key, echo = media_request(forwarded, request.headers.get("X-Forwarded-Method"))
+    except (BadPath, ValueError):
+        return Response("denied\n", status=403, headers=headers)
+    if not ACL.allows(user, caller_groups(), key, perm):
+        return Response("denied\n", status=403, headers=headers)
+    headers["X-Files-URI"] = echo
     return Response("", status=200, headers=headers)
 
 

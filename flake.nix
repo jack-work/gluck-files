@@ -54,12 +54,19 @@
           };
 
           websiteBuckets = [ cfg.bucket ];
-          allBuckets = websiteBuckets ++ [ cfg.graveyardBucket ];
+          mediaBuckets = lib.optional cfg.media.enable cfg.media.bucket;
+          allBuckets = websiteBuckets ++ [ cfg.graveyardBucket ] ++ mediaBuckets;
 
           garageWeb = config.services.kelliher-web.sites.gluck-files.backendSockets.garage;
           browserPathConfig = import ./lib/media-route.nix {
             listerAddress = "unix//run/kweb/gluck-files.sock";
             garageAddress = garageWeb.dial;
+            media =
+              if cfg.media.enable then {
+                webRoot = cfg.media.webRoot;
+                bucketHost = "${cfg.media.bucket}.${baseDomain}";
+                apiAddress = config.services.kelliher-web.sites.gluck-files.backendSockets.media.dial;
+              } else null;
           };
 
           # The retention vocabulary, declared ONCE. These strings name the
@@ -195,6 +202,27 @@
               chgrp ${cfg.listerUser} "$tmp"
               chmod 0440 "$tmp"
               mv -f "$tmp" ${cfg.listerCredentialsFile}
+            '' + lib.optionalString cfg.media.enable ''
+
+              ${garageCli} bucket website --allow -i index.html ${cfg.media.bucket}
+              if ! ${garageCli} key list | grep -qw "${cfg.media.keyName}"; then
+                ${garageCli} key create ${cfg.media.keyName} >/dev/null
+              fi
+              ${garageCli} bucket allow --read ${cfg.bucket} --key ${cfg.media.keyName} >/dev/null
+              ${garageCli} bucket deny --write --owner ${cfg.bucket} --key ${cfg.media.keyName} >/dev/null
+              ${garageCli} bucket allow --read --write ${cfg.media.bucket} --key ${cfg.media.keyName} >/dev/null
+              ${garageCli} bucket deny --owner ${cfg.media.bucket} --key ${cfg.media.keyName} >/dev/null
+              ${garageCli} bucket deny --read --write --owner ${cfg.graveyardBucket} --key ${cfg.media.keyName} >/dev/null
+
+              media_info=$(${garageCli} key info --show-secret ${cfg.media.keyName})
+              tmp=$(mktemp ${cfg.media.credentialsFile}.XXXXXX)
+              {
+                echo "AWS_ACCESS_KEY_ID=$(echo "$media_info" | sed -n 's/^Key ID: *//p')"
+                echo "AWS_SECRET_ACCESS_KEY=$(echo "$media_info" | sed -n 's/^Secret key: *//p')"
+              } > "$tmp"
+              chgrp ${cfg.media.user} "$tmp"
+              chmod 0440 "$tmp"
+              mv -f "$tmp" ${cfg.media.credentialsFile}
             '';
           };
         in
@@ -342,6 +370,39 @@
               '';
             };
 
+            media = {
+              enable = lib.mkEnableOption "streaming renditions under /_media/ on the browser path";
+              bucket = lib.mkOption {
+                type = lib.types.str;
+                default = "media";
+                description = "Website bucket holding renditions, keyed <source key>/<rev>/<file>.";
+              };
+              user = lib.mkOption {
+                type = lib.types.str;
+                default = "juglar";
+                description = "User that runs the media API and ingest, owns its socket and reads the ingest key.";
+              };
+              service = lib.mkOption {
+                type = lib.types.str;
+                default = "juglar.service";
+                description = "Unit that binds the media API socket.";
+              };
+              keyName = lib.mkOption {
+                type = lib.types.str;
+                default = "juglar-ingest";
+                description = "Garage key that reads the source bucket and writes only the media bucket.";
+              };
+              credentialsFile = lib.mkOption {
+                type = lib.types.path;
+                default = "/var/lib/gluck-files-media/credentials";
+                description = "Where the bootstrap writes the ingest key. Mode 0440, group media.user.";
+              };
+              webRoot = lib.mkOption {
+                type = lib.types.package;
+                description = "Store tree with player.html and static/, served by Caddy under /_media/.";
+              };
+            };
+
             ports = {
               s3 = lib.mkOption {
                 type = lib.types.port;
@@ -422,11 +483,12 @@
               group = cfg.listerUser;
             };
             users.groups.${cfg.listerUser} = { };
-            users.users.garage.extraGroups = [ cfg.listerUser ];
+            users.users.garage.extraGroups = [ cfg.listerUser ] ++ lib.optional cfg.media.enable cfg.media.user;
 
             systemd.tmpfiles.rules = [
               "d ${builtins.dirOf cfg.listerCredentialsFile} 0750 garage ${cfg.listerUser} -"
-            ];
+            ] ++ lib.optional cfg.media.enable
+              "d ${builtins.dirOf cfg.media.credentialsFile} 0750 garage ${cfg.media.user} -";
 
             systemd.services.gluck-files-lister = {
               description = "ACL gateway for the ${cfg.bucket} bucket";
@@ -442,6 +504,7 @@
                 LISTER_LISTEN = "socket";
                 LISTER_ACL_DB = cfg.aclDatabase;
                 LISTER_ADMIN_GROUP = cfg.adminGroup;
+                LISTER_MEDIA = if cfg.media.enable then "1" else "0";
                 AWS_EC2_METADATA_DISABLED = "true";
               };
               serviceConfig = {
@@ -518,9 +581,14 @@
               trustsRemoteHeaders = true;
               requiredGroups = [ "files-admin" ];
               proxySocket = "gluck-files-lister.service";
-              backendSockets.garage = { service = "garage.service"; owner = "garage"; };
+              backendSockets = {
+                garage = { service = "garage.service"; owner = "garage"; };
+              } // lib.optionalAttrs cfg.media.enable {
+                media = { service = cfg.media.service; owner = cfg.media.user; };
+              };
               extraConfig = browserPathConfig;
-              beforeAuthConfig = import ./lib/media-document-policy.nix;
+              beforeAuthConfig = import ./lib/media-document-policy.nix
+                + lib.optionalString cfg.media.enable (import ./lib/media-player-policy.nix);
               responseHeaders = mediaHeaders;
             };
 
@@ -605,6 +673,7 @@
           acl = suite "acl" "test_acl.py";
           gateway = suite "gateway" "test_gateway.py";
           authz = suite "authz" "test_authz.py";
+          media-authz = suite "media-authz" "test_media_authz.py";
           viewer = suite "viewer" "test_viewer.py";
           bucket-for = suite "bucket-for" "test_lister.py";
           scheme = (suite "scheme" "test_scheme.py").overrideAttrs { LISTER_TEMPLATE_BUILT = listerTemplateFor pkgs; };
