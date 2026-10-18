@@ -220,8 +220,7 @@
                 echo "AWS_ACCESS_KEY_ID=$(echo "$media_info" | sed -n 's/^Key ID: *//p')"
                 echo "AWS_SECRET_ACCESS_KEY=$(echo "$media_info" | sed -n 's/^Secret key: *//p')"
               } > "$tmp"
-              chgrp ${cfg.media.user} "$tmp"
-              chmod 0440 "$tmp"
+              chmod 0400 "$tmp"
               mv -f "$tmp" ${cfg.media.credentialsFile}
             '';
           };
@@ -380,7 +379,7 @@
               user = lib.mkOption {
                 type = lib.types.str;
                 default = "juglar";
-                description = "User that runs the media API and ingest, owns its socket and reads the ingest key.";
+                description = "User that runs the media API and ingest and owns its socket.";
               };
               service = lib.mkOption {
                 type = lib.types.str;
@@ -395,7 +394,7 @@
               credentialsFile = lib.mkOption {
                 type = lib.types.path;
                 default = "/var/lib/gluck-files-media/credentials";
-                description = "Where the bootstrap writes the ingest key. Mode 0440, group media.user.";
+                description = "Where the bootstrap writes the ingest key. Mode 0400, owner garage; the ingest unit receives it only through LoadCredential.";
               };
               webRoot = lib.mkOption {
                 type = lib.types.package;
@@ -483,12 +482,12 @@
               group = cfg.listerUser;
             };
             users.groups.${cfg.listerUser} = { };
-            users.users.garage.extraGroups = [ cfg.listerUser ] ++ lib.optional cfg.media.enable cfg.media.user;
+            users.users.garage.extraGroups = [ cfg.listerUser ];
 
             systemd.tmpfiles.rules = [
               "d ${builtins.dirOf cfg.listerCredentialsFile} 0750 garage ${cfg.listerUser} -"
             ] ++ lib.optional cfg.media.enable
-              "d ${builtins.dirOf cfg.media.credentialsFile} 0750 garage ${cfg.media.user} -";
+              "d ${builtins.dirOf cfg.media.credentialsFile} 0700 garage garage -";
 
             systemd.services.gluck-files-lister = {
               description = "ACL gateway for the ${cfg.bucket} bucket";
