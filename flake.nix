@@ -755,6 +755,8 @@ print('gateway, acl and the admin CLI all import from the shipped tree')
       # doc/CLI.md
       packages = forAllSystems (system:
         let pkgs = nixpkgs.legacyPackages.${system}; in {
+          lister-src = listerSrcFor pkgs;
+
           files-cli = pkgs.runCommand "files-cli" { } ''
             install -Dm444 ${./cli/files/command.toml} $out/files/command.toml
           '';
