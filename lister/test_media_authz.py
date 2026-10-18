@@ -68,12 +68,12 @@ class Authorisation(unittest.TestCase):
             L.ACL.revoke(g['subject'], g['path'], g['perm'])
         L.ACL.grant('user:alice', 'dad/', 'read', 'fixture')
 
-    def ask(self, uri, user='alice', method='GET', **extra):
+    def ask(self, uri, user='alice', method='GET', endpoint='/_files/authz-media', **extra):
         h = {'X-Forwarded-Uri': uri, 'X-Forwarded-Method': method}
         if user is not None:
             h['Remote-User'] = user
         h.update(extra)
-        return self.client.get('/_files/authz', base_url='http://files.kelliher.info', headers=h)
+        return self.client.get(endpoint, base_url='http://files.kelliher.info', headers=h)
 
     def test_rendition_follows_the_source_grant(self):
         r = self.ask(f'/_media/r/dad/a.mp3/{REV}/s_00000.m4s')
@@ -108,11 +108,22 @@ class Authorisation(unittest.TestCase):
     def test_no_identity_is_closed(self):
         self.assertEqual(self.ask('/_media/api/item/dad/a.mp3', user=None).status_code, 401)
 
+    def test_each_authorizer_answers_only_its_own_routes(self):
+        L.ACL.grant('user:alice', '', 'read', 'fixture')
+        rendition = f'/_media/r/dad/a.mp3/{REV}/s_00000.m4s'
+        r = self.ask(rendition, endpoint='/_files/authz')
+        self.assertEqual(r.status_code, 403)
+        self.assertNotIn('X-Files-URI', r.headers)
+        r = self.ask('/dad/a.mp3')
+        self.assertEqual(r.status_code, 403)
+        self.assertNotIn('X-Files-URI', r.headers)
+        self.assertEqual(self.ask('/dad/a.mp3', endpoint='/_files/authz').status_code, 200)
+
     def test_audio_page_loads_go_to_the_player(self):
-        r = self.ask('/dad/a%20b.mp3', **{'Sec-Fetch-Dest': 'document'})
+        r = self.ask('/dad/a%20b.mp3', endpoint='/_files/authz', **{'Sec-Fetch-Dest': 'document'})
         self.assertEqual(r.status_code, 303)
         self.assertEqual(r.headers['Location'], '/_media/play/dad/a%20b.mp3')
-        r = self.ask('/dad/a.mov', **{'Sec-Fetch-Dest': 'document'})
+        r = self.ask('/dad/a.mov', endpoint='/_files/authz', **{'Sec-Fetch-Dest': 'document'})
         self.assertEqual(r.headers['Location'], '/_files/view?uri=%2Fdad%2Fa.mov')
 
 

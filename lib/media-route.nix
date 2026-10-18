@@ -1,9 +1,9 @@
 { listerAddress, garageAddress, media ? null }:
 let
-  authorize = ''
+  authorizeAt = uri: ''
     request_header -X-Files-URI
     forward_auth ${listerAddress} {
-      uri /_files/authz
+      uri ${uri}
       copy_headers X-Files-URI
       transport http {
         dial_timeout 1s
@@ -11,6 +11,9 @@ let
       }
     }
   '';
+
+  authorize = authorizeAt "/_files/authz";
+  authorizeMedia = authorizeAt "/_files/authz-media";
 
   garageObject = hostHeader: ''
     @files_bad_uri {
@@ -62,14 +65,14 @@ let
     @media_rendition path /_media/r/*
     handle @media_rendition {
       route {
-        ${authorize}
+        ${authorizeMedia}
         ${garageObject media.bucketHost}
       }
     }
     @media_api path /_media/api/item/* /_media/api/lib/*
     handle @media_api {
       route {
-        ${authorize}
+        ${authorizeMedia}
         @media_bad_uri {
           not header_regexp X-Files-URI "^/(([A-Za-z0-9._~-]|%[0-9A-F]{2})+(/([A-Za-z0-9._~-]|%[0-9A-F]{2})+)*/?)?$"
         }

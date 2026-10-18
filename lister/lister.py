@@ -332,9 +332,8 @@ def authorise_object():
         return Response("unauthenticated\n", status=401, headers=headers)
     if bucket_for(request.host) is None:
         return Response("denied\n", status=403, headers=headers)
-    forwarded = request.headers.get("X-Forwarded-Uri") or ""
-    if forwarded.startswith("/_media/"):
-        return authorise_media(user, forwarded, headers)
+    if (request.headers.get("X-Forwarded-Uri") or "").startswith("/_media/"):
+        return Response("denied\n", status=403, headers=headers)
     if request.headers.get("X-Forwarded-Method") not in ("GET", "HEAD"):
         return Response("denied\n", status=403, headers=headers)
     try:
@@ -351,11 +350,16 @@ def authorise_object():
     return Response("", status=200, headers=headers)
 
 
-def authorise_media(user, forwarded, headers):
-    if not MEDIA:
+@app.get("/_files/authz-media")
+def authorise_media():
+    headers = {"Cache-Control": "no-store"}
+    user = caller()
+    if not user:
+        return Response("unauthenticated\n", status=401, headers=headers)
+    if not MEDIA or bucket_for(request.host) is None:
         return Response("denied\n", status=403, headers=headers)
     try:
-        perm, key, echo = media_request(forwarded, request.headers.get("X-Forwarded-Method"))
+        perm, key, echo = media_request(request.headers.get("X-Forwarded-Uri"), request.headers.get("X-Forwarded-Method"))
     except (BadPath, ValueError):
         return Response("denied\n", status=403, headers=headers)
     if not ACL.allows(user, caller_groups(), key, perm):

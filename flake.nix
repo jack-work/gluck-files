@@ -587,7 +587,7 @@
               };
               extraConfig = browserPathConfig;
               beforeAuthConfig = import ./lib/media-document-policy.nix
-                + lib.optionalString cfg.media.enable (import ./lib/media-player-policy.nix);
+                + lib.optionalString cfg.media.enable (import ./lib/media-player-policy.nix { host = "files.${baseDomain}"; });
               responseHeaders = mediaHeaders;
             };
 
