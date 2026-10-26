@@ -12,6 +12,8 @@ Status: deployed 2026-10-14, spain 79fb26b.
 | browser directory | Authelia, then lister `list` | lister HTML |
 | `/_files/view?uri=` | Authelia, then lister `read` | lister HTML embedding the stable object path |
 | browser object, GET or HEAD | Authelia, then `/_files/authz` checks `read` on every request | Caddy proxies Garage web |
+| cast ticket, `POST /_files/cast-ticket` | Authelia, exact Origin, `read` for the caster | lister JSON, no object bytes |
+| cast stream, the hub's route | no Authelia; `/_files/authz-cast` checks the ticket and `read` for its caster on every request | Caddy proxies Garage web |
 
 The browser never receives a capability URL. Every Range a player sends after a
 seek is re-authorised. Revocation stops the next request; bytes already sent are

@@ -19,6 +19,7 @@ Admin is not a special case in code: `group:files-admin` holds read/list/write
 on the root, which inherits everywhere. One mechanism, one code path.
 """
 
+import json
 import logging
 import os
 import socket
@@ -34,6 +35,7 @@ from markupsafe import escape
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from acl import Acl, BadPath, canonical_object_uri, media_request, normalise
+import cast
 
 BUCKETS = frozenset(
     b for b in os.environ.get("LISTER_BUCKETS", "files").replace(",", " ").split() if b
@@ -46,6 +48,8 @@ MAX_KEYS = int(os.environ.get("LISTER_MAX_KEYS", "2000"))
 ACL_DB = os.environ.get("LISTER_ACL_DB", "/var/lib/gluck-files-lister/acl.db")
 MAX_QUEUE = int(os.environ.get("LISTER_MAX_QUEUE", "8"))
 MEDIA = os.environ.get("LISTER_MEDIA") == "1"
+CAST_ORIGIN = os.environ.get("LISTER_CAST_ORIGIN", "")
+CAST_KEY = cast.load_key()
 MEDIA_PLAYER_EXTENSIONS = (".mp3", ".m4a", ".m4b", ".aac", ".wav", ".oga", ".ogg", ".opus", ".flac")
 
 with open(TEMPLATE, encoding="utf-8") as fh:
@@ -346,6 +350,67 @@ def authorise_object():
             and "download=1" not in request.headers.get("X-Forwarded-Uri", "").partition("?")[2].split("&")):
         headers["Location"] = viewer_href(uri)
         return Response("", status=303, headers=headers)
+    headers["X-Files-URI"] = uri
+    return Response("", status=200, headers=headers)
+
+
+def cast_enabled():
+    return bool(CAST_ORIGIN) and CAST_KEY is not None
+
+
+@app.post("/_files/cast-ticket")
+def cast_ticket():
+    """Issue a ticket for one object to one screen, to the person asking.
+
+    A plain POST with a JSON body sent as text/plain, so a browser sends no
+    preflight, which Authelia would refuse for lack of a cookie. CSRF is held
+    off by the exact Origin and Sec-Fetch-Site; only that origin may read the
+    answer."""
+    if not cast_enabled():
+        abort(404)
+    origin = request.headers.get("Origin", "")
+    headers = {"Cache-Control": "no-store", "Vary": "Origin"}
+    if origin != CAST_ORIGIN or request.headers.get("Sec-Fetch-Site", "same-site") not in ("same-site", "same-origin"):
+        return Response("denied\n", status=403, headers=headers)
+    headers.update({"Access-Control-Allow-Origin": CAST_ORIGIN, "Access-Control-Allow-Credentials": "true"})
+    user = caller()
+    if not user:
+        return Response("unauthenticated\n", status=401, headers=headers)
+    if bucket_for(request.host) is None:
+        return Response("denied\n", status=403, headers=headers)
+    try:
+        body = json.loads(request.get_data(cache=False, as_text=True) or "{}")
+        key, _ = canonical_object_uri(body.get("uri"))
+        device = body.get("device")
+        groups = caller_groups()
+        if not ACL.allows(user, groups, key, "read"):
+            return Response("denied\n", status=403, headers=headers)
+        ticket, exp = cast.mint(CAST_KEY, user, groups, key, device)
+    except (BadPath, ValueError, AttributeError, cast.BadTicket):
+        return Response("bad request\n", status=400, headers=headers)
+    log.info("cast ticket for %s to device %s", user, device)
+    headers["Content-Type"] = "application/json"
+    return Response(json.dumps({"ticket": ticket, "exp": exp}), status=200, headers=headers)
+
+
+@app.get("/_files/authz-cast")
+def authorise_cast():
+    """forward_auth for the hub's stream route: no Authelia, no Remote-User.
+
+    The ticket names the caster, their groups, one key and one device. The
+    ACL is read now, so a removed grant stops the next range."""
+    headers = {"Cache-Control": "no-store"}
+    if not cast_enabled():
+        return Response("denied\n", status=403, headers=headers)
+    if request.headers.get("X-Forwarded-Method") not in ("GET", "HEAD"):
+        return Response("denied\n", status=403, headers=headers)
+    try:
+        t = cast.verify(CAST_KEY, request.headers.get("X-Cast-Ticket", ""), request.headers.get("X-Cast-Device", ""))
+        key, uri = canonical_object_uri(quote("/" + t["k"], safe="/"))
+    except (cast.BadTicket, BadPath, ValueError):
+        return Response("denied\n", status=403, headers=headers)
+    if key != t["k"] or not ACL.allows(t["c"], cast.ticket_groups(t), key, "read"):
+        return Response("denied\n", status=403, headers=headers)
     headers["X-Files-URI"] = uri
     return Response("", status=200, headers=headers)
 

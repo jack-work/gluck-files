@@ -166,3 +166,32 @@ If you are adding a site: either your backend verifies JWTs against Authelia's
 JWKS (see `gluck_calendar.py`'s `bearer_to_remote_headers`), or your site block
 closes the bypass the way this one does. There is no third option that is
 merely "gated by Authelia", however much the config looks like it.
+
+## Cast tickets
+
+tv.kelliher.info casts a file to a linked screen without holding any storage
+key or asserting anyone's name. The person's own browser asks this site,
+through their own Authelia session, for a ticket; the hub only carries it.
+
+| step | who | checks |
+|---|---|---|
+| `POST /_files/cast-ticket` `{uri, device}` | the caster's browser, cross-origin from `cast.origin` | Authelia session, the exact Origin and `Sec-Fetch-Site` same-site, `read` on the key for Remote-User and Remote-Groups |
+| `GET /_files/authz-cast` with `X-Cast-Ticket`, `X-Cast-Device` | Caddy's forward_auth on the hub's stream route, no Authelia | HMAC, expiry, the device, `read` on the key for the ticket's caster against the ACL as it is now |
+
+Issuance is a plain POST whose JSON body is sent as `text/plain`, so a browser
+sends no CORS preflight (Authelia would refuse one: preflights carry no cookie).
+Cross-site forgery is held off by the exact Origin, and only that origin may
+read the answer.
+
+The ticket is `{v, c: caster, g: groups, k: key, d: device, e: expiry}` signed
+with HMAC-SHA256 under `cast.keyFile`, delivered by LoadCredential.
+
+**What lags.** The ACL is read on every range, so removing a grant stops the
+next request. Groups are frozen into the ticket, because this path has no
+Authelia and the lister reads no directory: taking someone out of a group lags
+by at most the ticket's life, 4 hours, for one object on one device. There is no
+renewal. Reading groups from lldap per request is the follow-up that removes the
+lag; `cast.ticket_groups` is the one function it replaces.
+
+**Kill switch.** Rotate the cast key and restart the lister: every ticket stops
+verifying at once.

@@ -13,6 +13,7 @@
         cp ${./lister/acl.py}    $out/acl.py
         cp ${./lister/lister.py} $out/lister.py
         cp ${./lister/aclctl.py} $out/aclctl.py
+        cp ${./lister/cast.py}   $out/cast.py
       '';
 
       # doc/LISTER.md
@@ -345,6 +346,29 @@
               '';
             };
 
+            cast = {
+              origin = lib.mkOption {
+                type = lib.types.nullOr lib.types.str;
+                default = null;
+                example = "https://tv.example.com";
+                description = ''
+                  The one origin allowed to ask for cast tickets
+                  (POST /_files/cast-ticket) and read the answer. Null turns
+                  casting off: both cast endpoints refuse.
+                '';
+              };
+              keyFile = lib.mkOption {
+                type = lib.types.nullOr lib.types.path;
+                default = null;
+                description = ''
+                  At least 32 random bytes that sign cast tickets, delivered to
+                  the lister by LoadCredential as cast-ticket-key, never by
+                  environment. Rotating it and restarting the lister voids every
+                  ticket at once.
+                '';
+              };
+            };
+
             listerUser = lib.mkOption {
               type = lib.types.str;
               default = "gluck-files-lister";
@@ -505,12 +529,15 @@
                 LISTER_ADMIN_GROUP = cfg.adminGroup;
                 LISTER_MEDIA = if cfg.media.enable then "1" else "0";
                 AWS_EC2_METADATA_DISABLED = "true";
+              } // lib.optionalAttrs (cfg.cast.origin != null) {
+                LISTER_CAST_ORIGIN = cfg.cast.origin;
               };
               serviceConfig = {
                 ExecStart = "${listerPython}/bin/python3 ${listerSrc}/lister.py";
                 StateDirectory = "gluck-files-acl";
                 StateDirectoryMode = "0750";
                 EnvironmentFile = cfg.listerCredentialsFile;
+                LoadCredential = lib.optional (cfg.cast.keyFile != null) "cast-ticket-key:${cfg.cast.keyFile}";
                 User = cfg.listerUser;
                 Group = cfg.listerUser;
                 Restart = "on-failure";
@@ -672,6 +699,7 @@
           acl = suite "acl" "test_acl.py";
           gateway = suite "gateway" "test_gateway.py";
           authz = suite "authz" "test_authz.py";
+          cast = suite "cast" "test_cast.py";
           media-authz = suite "media-authz" "test_media_authz.py";
           viewer = suite "viewer" "test_viewer.py";
           bucket-for = suite "bucket-for" "test_lister.py";
