@@ -41,7 +41,7 @@ def _unb64(text):
 
 
 def mint(secret, caster, groups, key, device, lifetime=CAP_SECONDS, now=None):
-    if not DEVICE.match(device or ""):
+    if not isinstance(device, str) or not DEVICE.match(device):
         raise BadTicket("device")
     lifetime = min(int(lifetime), CAP_SECONDS)
     exp = int(now if now is not None else time.time()) + lifetime

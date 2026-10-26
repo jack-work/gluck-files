@@ -66,7 +66,7 @@ class Tickets(unittest.TestCase):
             os.environ['LISTER_CAST_KEY_FILE'] = saved
 
     def test_device_ids_are_plain(self):
-        for bad in ['', 'a/b', 'a b', 'x' * 65, None]:
+        for bad in ['', 'a/b', 'a b', 'x' * 65, None, 7, ['dev1'], {'d': 1}]:
             with self.assertRaises(cast.BadTicket):
                 cast.mint(self.secret, 'a', [], 'k', bad)
 
@@ -116,6 +116,10 @@ class Endpoints(unittest.TestCase):
         self.assertEqual(self.issue(uri='/home/c.mp4', groups='family').status_code, 200)
         self.assertEqual(self.issue(uri='/films/../secret/b.mp4').status_code, 400)
         self.assertEqual(self.issue(device='a/b').status_code, 400)
+        r = self.client.post('/_files/cast-ticket', base_url='https://files.kelliher.info',
+                             data=json.dumps({'uri': '/films/a.mp4', 'device': 7}),
+                             headers={'Origin': ORIGIN, 'Remote-User': 'alice', 'Content-Type': 'text/plain'})
+        self.assertEqual(r.status_code, 400)
 
     def test_a_removed_grant_stops_the_next_range(self):
         ticket = self.issue().get_json()['ticket']
