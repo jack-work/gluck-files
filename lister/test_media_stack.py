@@ -112,7 +112,11 @@ api_bind_addr = "127.0.0.1:28393"
         key = re.search(r'^Key ID:\s*(\S+)', raw, re.M).group(1)
         secret = re.search(r'^Secret key:\s*(\S+)', raw, re.M).group(1)
         garage('bucket', 'allow', '--read', '--write', '--owner', 'files', '--key', key)
+        cast_key = ROOT / 'cast-key'
+        cast_key.write_bytes(secrets.token_bytes(48))
+        cast_key.chmod(0o600)
         os.environ.update({
+            'LISTER_CAST_ORIGIN': 'https://tv.kelliher.info', 'LISTER_CAST_KEY_FILE': str(cast_key),
             'LISTER_TEMPLATE': '/dev/null', 'LISTER_ACL_DB': str(ROOT / 'acl.db'),
             'LISTER_BUCKETS': 'files', 'LISTER_ROOT_DOMAIN': '.kelliher.info',
             'LISTER_ENDPOINT': 'http://127.0.0.1:28390', 'LISTER_REGION': 'test',
@@ -427,6 +431,34 @@ api_bind_addr = "127.0.0.1:28393"
         self.assertEqual(h['content-type'],'text/html')
         self.assertNotIn('content-disposition',h)
         self.denied(self.get('/wfh/private.mp4',headers={'Sec-Fetch-Dest':'document'}))
+
+    def post(self, path, body, user='alice', headers=None):
+        h = {'Host': 'files.kelliher.info', 'Content-Type': 'text/plain;charset=UTF-8'}
+        if user:
+            h['Cookie'] = f'user={user}'
+        h.update(headers or {})
+        c = http.client.HTTPConnection('127.0.0.1', 28780, timeout=10)
+        c.request('POST', path, body=body, headers=h)
+        r = c.getresponse()
+        result = (r.status, {k.lower(): v for k, v in r.getheaders()}, r.read())
+        c.close()
+        return result
+
+    def test_18_cast_ticket_reaches_the_lister_only_as_a_post(self):
+        status, h, body = self.post('/_files/cast-ticket', '{"uri":"/dad/movie.mp4","device":"dev1"}',
+                                    headers={'Origin': 'https://tv.kelliher.info', 'Sec-Fetch-Site': 'same-site'})
+        self.assertEqual(status, 200, body)
+        self.assertIn(b'"ticket"', body)
+        self.assertEqual(h['access-control-allow-origin'], 'https://tv.kelliher.info')
+        self.assertEqual(self.get('/_files/cast-ticket')[0], 404)
+
+    def test_19_the_cast_authorizer_is_not_reachable_on_the_files_host(self):
+        ticket = self.L.cast.mint(self.L.CAST_KEY, 'alice', [], 'dad/movie.mp4', 'dev1')[0]
+        for method in ('GET', 'POST'):
+            status, _, body = self.get('/_files/authz-cast', method=method,
+                                       headers={'X-Cast-Ticket': ticket, 'X-Cast-Device': 'dev1', 'X-Forwarded-Method': 'GET'})
+            self.assertEqual(status, 404, (method, body))
+            self.assertNotIn(b'X-Files-URI', body)
 
     def test_98_first_auth_transport_error_has_policy(self):
         self.auth.shutdown()

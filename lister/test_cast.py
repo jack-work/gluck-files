@@ -54,6 +54,17 @@ class Tickets(unittest.TestCase):
         with self.assertRaises(cast.BadTicket):
             cast.verify(b'x' * 32, t, 'dev1', now=1001)
 
+    def test_a_short_key_is_refused_not_used(self):
+        short = pathlib.Path(TMP.name) / 'short-key'
+        short.write_bytes(b'k' * 8)
+        saved = os.environ['LISTER_CAST_KEY_FILE']
+        os.environ['LISTER_CAST_KEY_FILE'] = str(short)
+        try:
+            with self.assertRaises(ValueError):
+                cast.load_key()
+        finally:
+            os.environ['LISTER_CAST_KEY_FILE'] = saved
+
     def test_device_ids_are_plain(self):
         for bad in ['', 'a/b', 'a b', 'x' * 65, None]:
             with self.assertRaises(cast.BadTicket):

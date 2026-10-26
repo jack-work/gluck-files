@@ -1,24 +1,3 @@
-"""Cast tickets: one object, one screen, a few hours, for a caster who is not there.
-
-A person casting from tv.kelliher.info asks this lister, through their own
-Authelia session, for a ticket naming one key and the device id the hub gave
-them. The lister checks `read` for that person and signs
-
-    {"v": 1, "c": caster, "g": [groups], "k": key, "d": device, "e": expiry}
-
-with HMAC-SHA256. The hub keeps the ticket and, each time the screen fetches a
-range, sends it with the device id to /_files/authz-cast. The ticket is checked
-again there: signature, expiry, the device, and `read` on the key for the caster
-against the ACL as it is at that moment. A grant removed from the ACL stops the
-next range.
-
-Groups are frozen into the ticket because the cast path has no Authelia and the
-lister has no directory read yet. So taking someone out of a group lags by at
-most the ticket's lifetime, CAP_SECONDS, for one object on one device, and
-there is no renewal. Rotating the cast key and restarting the lister voids every
-ticket at once: that is the kill switch.
-"""
-
 import base64
 import hashlib
 import hmac
@@ -48,7 +27,7 @@ def load_key():
     except FileNotFoundError:
         return None
     if len(key) < 32:
-        raise RuntimeError("the cast ticket key must be at least 32 bytes")
+        raise ValueError("the cast ticket key must be at least 32 bytes")
     return key
 
 

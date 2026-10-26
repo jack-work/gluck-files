@@ -49,7 +49,11 @@ ACL_DB = os.environ.get("LISTER_ACL_DB", "/var/lib/gluck-files-lister/acl.db")
 MAX_QUEUE = int(os.environ.get("LISTER_MAX_QUEUE", "8"))
 MEDIA = os.environ.get("LISTER_MEDIA") == "1"
 CAST_ORIGIN = os.environ.get("LISTER_CAST_ORIGIN", "")
-CAST_KEY = cast.load_key()
+try:
+    CAST_KEY = cast.load_key()
+except (OSError, ValueError) as e:
+    logging.getLogger("gluck-files").error("casting is off: %s", e)
+    CAST_KEY = None
 MEDIA_PLAYER_EXTENSIONS = (".mp3", ".m4a", ".m4b", ".aac", ".wav", ".oga", ".ogg", ".opus", ".flac")
 
 with open(TEMPLATE, encoding="utf-8") as fh:
@@ -360,12 +364,6 @@ def cast_enabled():
 
 @app.post("/_files/cast-ticket")
 def cast_ticket():
-    """Issue a ticket for one object to one screen, to the person asking.
-
-    A plain POST with a JSON body sent as text/plain, so a browser sends no
-    preflight, which Authelia would refuse for lack of a cookie. CSRF is held
-    off by the exact Origin and Sec-Fetch-Site; only that origin may read the
-    answer."""
     if not cast_enabled():
         abort(404)
     origin = request.headers.get("Origin", "")
@@ -395,10 +393,6 @@ def cast_ticket():
 
 @app.get("/_files/authz-cast")
 def authorise_cast():
-    """forward_auth for the hub's stream route: no Authelia, no Remote-User.
-
-    The ticket names the caster, their groups, one key and one device. The
-    ACL is read now, so a removed grant stops the next range."""
     headers = {"Cache-Control": "no-store"}
     if not cast_enabled():
         return Response("denied\n", status=403, headers=headers)

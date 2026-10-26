@@ -15,6 +15,12 @@ Status: deployed 2026-10-14, spain 79fb26b.
 | cast ticket, `POST /_files/cast-ticket` | Authelia, exact Origin, `read` for the caster | lister JSON, no object bytes |
 | cast stream, the hub's route | no Authelia; `/_files/authz-cast` checks the ticket and `read` for its caster on every request | Caddy proxies Garage web |
 
+Only `POST /_files/cast-ticket` is carved out of the `/_files/*` 404, and only
+when `cast.origin` is set; `/_files/authz-cast` stays 404 on the files host
+because the hub's listener forward-auths to the lister socket directly. The files
+site's `requiredGroups` still applies, so today only `files-admin` can obtain a
+ticket.
+
 The browser never receives a capability URL. Every Range a player sends after a
 seek is re-authorised. Revocation stops the next request; bytes already sent are
 not recalled. Authelia's cached groups keep their normal refresh interval;

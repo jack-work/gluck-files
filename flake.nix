@@ -60,6 +60,7 @@
 
           garageWeb = config.services.kelliher-web.sites.gluck-files.backendSockets.garage;
           browserPathConfig = import ./lib/media-route.nix {
+            castTicket = cfg.cast.origin != null;
             listerAddress = "unix//run/kweb/gluck-files.sock";
             garageAddress = garageWeb.dial;
             media =
@@ -358,7 +359,7 @@
                 '';
               };
               keyFile = lib.mkOption {
-                type = lib.types.nullOr lib.types.path;
+                type = lib.types.nullOr lib.types.str;
                 default = null;
                 description = ''
                   At least 32 random bytes that sign cast tickets, delivered to
@@ -658,6 +659,11 @@
 
             assertions = [
               {
+                assertion = cfg.cast.keyFile == null
+                  || (lib.hasPrefix "/" cfg.cast.keyFile && !(lib.hasPrefix builtins.storeDir cfg.cast.keyFile));
+                message = "gluck-files: cast.keyFile must be an absolute path outside the Nix store, which is world-readable.";
+              }
+              {
                 assertion = config.services.kelliher-web.baseDomains != [ ];
                 message =
                   "gluck-files: Garage's web endpoint resolves buckets from the Host header "
@@ -738,6 +744,7 @@
                   ${import ./lib/media-route.nix {
                     listerAddress = "@LISTER@";
                     garageAddress = "@GARAGE@";
+                    castTicket = true;
                   }}
                   reverse_proxy @LISTER@
                 }

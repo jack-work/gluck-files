@@ -1,4 +1,4 @@
-{ listerAddress, garageAddress, media ? null }:
+{ listerAddress, garageAddress, media ? null, castTicket ? false }:
 let
   authorizeAt = uri: ''
     request_header -X-Files-URI
@@ -94,6 +94,15 @@ in
   handle @files_viewer {
     reverse_proxy ${listerAddress}
   }
+  ${if castTicket then ''
+    @files_cast_ticket {
+      path /_files/cast-ticket
+      method POST
+    }
+    handle @files_cast_ticket {
+      reverse_proxy ${listerAddress}
+    }
+  '' else ""}
   @files_internal path /_files/*
   respond @files_internal 404
   ${if media == null then "" else mediaRoutes}
