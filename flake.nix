@@ -59,6 +59,7 @@
 
           garageWeb = config.services.kelliher-web.sites.gluck-files.backendSockets.garage;
           browserPathConfig = import ./lib/media-route.nix {
+            inherit (cfg) bearerClients;
             listerAddress = "unix//run/kweb/gluck-files.sock";
             garageAddress = garageWeb.dial;
             media =
@@ -333,6 +334,18 @@
               '';
             };
 
+            bearerClients = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              default = [ ];
+              example = [ "aguatv-tv" ];
+              description = ''
+                OAuth clients whose bearer tokens, verified at the edge, may
+                read objects, renditions and the media app, and POST exactly
+                /_media/api/me and /_media/api/me/state. Empty refuses every
+                bearer request on files.
+              '';
+            };
+
             adminGroup = lib.mkOption {
               type = lib.types.str;
               default = "files-admin";
@@ -556,28 +569,13 @@
             # behind: Garage's web endpoint serves only buckets explicitly
             # marked as websites, and serves an index document or 404. There
             # is no directory listing, so links are the interface here.
-            #
-            # THE BEARER BYPASS STAYS DEAD ON THIS HOSTNAME. The platform now
-            # defaults `bearerBypass` to false, so `requireAuth` alone gates
-            # every request here, which is what this site needs: Garage's web
-            # endpoint verifies nothing by design, since serving a website
-            # bucket to unsigned requests is its entire job, and Authelia is
-            # the only gate in front of it.
-            #
-            # The two lines below are belt and braces, and they are not
-            # redundant. The platform's assertion that refuses `bearerBypass`
-            # on a static tree cannot fire here, because this site proxies to a
-            # backend like any API. So a future author could switch the
-            # bypass on for this hostname and reopen exactly the hole this
-            # service was built to close. These lines make that switch
-            # ineffective rather than merely inadvisable.
-            #
-            # Signed callers are not turned away from the estate, they are
-            # sent to the door built for them: s3.<domain>.
+
             services.kelliher-web.sites.gluck-files = {
               subdomains = [ "files" ];
               requireAuth = true;
-              trustsRemoteHeaders = true;
+              trustsRemoteHeaders = cfg.bearerClients == [ ];
+              trustsRemoteHeadersOrBearer = cfg.bearerClients != [ ];
+              bearerClients = cfg.bearerClients;
               requiredGroups = [ "files-admin" ];
               proxySocket = "gluck-files-lister.service";
               backendSockets = {
@@ -687,45 +685,68 @@
           media-stack = pkgs.runCommand "gluck-files-media-stack" {
             nativeBuildInputs = [ py pkgs.caddy pkgs.garage_1_x ];
             LISTER_SRC = listerSrcFor pkgs;
-            MEDIA_CADDYFILE = pkgs.writeText "files-media-test-Caddyfile" ''
+            MEDIA_CADDYFILE = let
+              headers = pkgs.lib.concatStringsSep "\n" (pkgs.lib.mapAttrsToList
+                (name: value: ">${name} ${builtins.toJSON value}") mediaHeaders);
+              authelia = ''
+                uri /api/authz/forward-auth
+                copy_headers Remote-User Remote-Groups Remote-Email Remote-Name
+              '';
+              site = port: bearerClients: ''
+                :${toString port} {
+                  route {
+                    ${import ./lib/media-document-policy.nix}
+                    header {
+                      ${headers}
+                    }
+                    request_header -Remote-User
+                    request_header -Remote-Groups
+                    request_header -Remote-Email
+                    request_header -Remote-Name
+                    request_header -Remote-Principal
+                    request_header -Remote-Client
+                    ${if bearerClients == [ ] then ''
+                      forward_auth 127.0.0.1:28091 {
+                        ${authelia}
+                      }
+                    '' else ''
+                      @no-bearer-token not header_regexp Authorization "^Bearer [A-Za-z0-9._~+/-]+=*$"
+                      forward_auth @no-bearer-token 127.0.0.1:28091 {
+                        ${authelia}
+                      }
+                      @bearer-token header_regexp Authorization "^Bearer [A-Za-z0-9._~+/-]+=*$"
+                      forward_auth @bearer-token 127.0.0.1:28092 {
+                        uri /verify/gluck-files
+                        copy_headers Remote-User Remote-Groups Remote-Principal Remote-Client
+                      }
+                    ''}
+                    ${import ./lib/media-route.nix {
+                      inherit bearerClients;
+                      listerAddress = "@LISTER@";
+                      garageAddress = "@GARAGE@";
+                      media = {
+                        webRoot = pkgs.emptyDirectory;
+                        bucketHost = "media.kelliher.info";
+                        apiAddress = "@MEDIAAPI@";
+                      };
+                    }}
+                    reverse_proxy @LISTER@
+                  }
+                  handle_errors {
+                    header {
+                      ${headers}
+                    }
+                    respond "" {err.status_code}
+                  }
+                }
+              '';
+            in pkgs.writeText "files-media-test-Caddyfile" ''
               {
                 auto_https off
                 admin off
               }
-              :28780 {
-                route {
-                  ${import ./lib/media-document-policy.nix}
-                  header {
-                    ${pkgs.lib.concatStringsSep "\n" (pkgs.lib.mapAttrsToList
-                      (name: value: ">${name} ${builtins.toJSON value}") mediaHeaders)}
-                  }
-                  request_header -Remote-User
-                  request_header -Remote-Groups
-                  request_header -Remote-Email
-                  request_header -Remote-Name
-                  forward_auth 127.0.0.1:28091 {
-                    uri /api/authz/forward-auth
-                    copy_headers Remote-User Remote-Groups Remote-Email Remote-Name
-                  }
-                  ${import ./lib/media-route.nix {
-                    listerAddress = "@LISTER@";
-                    garageAddress = "@GARAGE@";
-                    media = {
-                      webRoot = pkgs.emptyDirectory;
-                      bucketHost = "media.kelliher.info";
-                      apiAddress = "@MEDIAAPI@";
-                    };
-                  }}
-                  reverse_proxy @LISTER@
-                }
-                handle_errors {
-                  header {
-                    ${pkgs.lib.concatStringsSep "\n" (pkgs.lib.mapAttrsToList
-                      (name: value: ">${name} ${builtins.toJSON value}") mediaHeaders)}
-                  }
-                  respond "" {err.status_code}
-                }
-              }
+              ${site 28780 [ "aguatv-tv" ]}
+              ${site 28781 [ ]}
             '';
           } ''
             set -euo pipefail

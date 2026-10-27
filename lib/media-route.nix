@@ -1,5 +1,37 @@
-{ listerAddress, garageAddress, media ? null }:
+{ listerAddress, garageAddress, media ? null, bearerClients ? [ ] }:
 let
+  bearerCaller = ''
+    header Remote-Principal human
+    header Remote-Client ${builtins.concatStringsSep " " bearerClients}
+  '';
+
+  bearerGate =
+    if bearerClients == [ ] then ''
+      @bearer header Authorization Bearer*
+      respond @bearer 403
+    '' else ''
+      @bearer_refused {
+        header Authorization Bearer*
+        not {
+          ${bearerCaller}
+          method GET HEAD
+          path_regexp ^/([^_/]|[^_/].*[^/])$
+        }
+        not {
+          ${bearerCaller}
+          method GET HEAD
+          path /_media/ /_media/app/* /_media/static/* /_media/r/* /_media/api/me /_media/api/me/*
+        }
+        not {
+          ${bearerCaller}
+          method POST
+          path /_media/api/me /_media/api/me/state
+        }
+      }
+      respond @bearer_refused 403
+      request_header -Authorization
+    '';
+
   authorizeAt = uri: ''
     request_header -X-Files-URI
     forward_auth ${listerAddress} {
@@ -101,8 +133,7 @@ let
   '';
 in
 ''
-  @bearer header Authorization Bearer*
-  respond @bearer 403
+  ${bearerGate}
   @files_viewer path /_files/view
   handle @files_viewer {
     reverse_proxy ${listerAddress}

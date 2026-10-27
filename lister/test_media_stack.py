@@ -26,6 +26,12 @@ WEB_SOCKET = ROOT / 'web' / 'sock'
 LISTER_SOCKET = ROOT / 'lister.sock'
 MEDIA_API_SOCKET = ROOT / 'media-api.sock'
 IDENTITY = {'alice': ('alice', ''), 'bob': ('bob', ''), 'admin': ('admin', 'files-admin')}
+TOKENS = {
+    'tv-alice': ('alice', '', 'human', 'aguatv-tv'),
+    'tv-bob': ('bob', '', 'human', 'aguatv-tv'),
+    'kcal-alice': ('alice', '', 'human', 'kcal'),
+    'tv-service': ('aguatv-tv', '', 'service', 'aguatv-tv'),
+}
 
 
 def start(argv, marker):
@@ -81,15 +87,37 @@ class Auth(http.server.BaseHTTPRequestHandler):
         pass
 
 
+class Verifier(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        auth = self.headers.get('Authorization', '')
+        identity = TOKENS.get(auth[len('Bearer '):]) if auth.startswith('Bearer ') else None
+        if self.path.split('?', 1)[0] != '/verify/gluck-files' or not identity:
+            self.send_response(401)
+            self.end_headers()
+            return
+        self.send_response(200)
+        for name, value in zip(('Remote-User', 'Remote-Groups', 'Remote-Principal', 'Remote-Client'), identity):
+            self.send_header(name, value)
+        self.end_headers()
+    def log_message(self, *_):
+        pass
+
+
 class Echo(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         import json
-        body = json.dumps({'path': self.path, 'headers': [[k, v] for k, v in self.headers.items()]}).encode()
+        length = int(self.headers.get('Content-Length') or 0)
+        sent = self.rfile.read(length).decode() if length else ''
+        body = json.dumps({'path': self.path, 'method': self.command, 'body': sent,
+                           'headers': [[k, v] for k, v in self.headers.items()]}).encode()
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    do_POST = do_GET
+    do_HEAD = do_GET
 
     def log_message(self, *_):
         pass
@@ -169,6 +197,11 @@ api_bind_addr = "127.0.0.1:28393"
         cls.L.ACL.grant('user:alice', 'dad/', 'read', 'fixture')
         cls.L.ACL.grant('user:alice', 'dad/', 'list', 'fixture')
         cls.mode = None
+        cls.authz_seen = []
+        @cls.L.app.before_request
+        def record():
+            if cls.L.request.path.startswith('/_files/authz'):
+                cls.authz_seen.append(dict(cls.L.request.headers))
         @cls.L.app.after_request
         def fault(response):
             if cls.L.request.path == '/_files/authz' and cls.mode is not None:
@@ -185,6 +218,8 @@ api_bind_addr = "127.0.0.1:28393"
         threading.Thread(target=cls.lister.run, daemon=True).start()
         cls.auth = http.server.ThreadingHTTPServer(('127.0.0.1', 28091), Auth)
         threading.Thread(target=cls.auth.serve_forever, daemon=True).start()
+        cls.verifier = http.server.ThreadingHTTPServer(('127.0.0.1', 28092), Verifier)
+        threading.Thread(target=cls.verifier.serve_forever, daemon=True).start()
         cls.echo = UnixHTTPServer(str(MEDIA_API_SOCKET), Echo)
         threading.Thread(target=cls.echo.serve_forever, daemon=True).start()
         caddyfile = ROOT / 'Caddyfile'
@@ -198,6 +233,7 @@ api_bind_addr = "127.0.0.1:28393"
     @classmethod
     def tearDownClass(cls):
         cls.auth.shutdown()
+        cls.verifier.shutdown()
         cls.echo.shutdown()
         cls.lister.close()
         for process in reversed(PROCESSES):
@@ -215,13 +251,13 @@ api_bind_addr = "127.0.0.1:28393"
         self.L.ACL.grant('user:alice', SPACE_KEY, 'read', 'fixture')
         type(self).mode = None
 
-    def get(self, path, user='alice', method='GET', headers=None, unix=None):
+    def get(self, path, user='alice', method='GET', headers=None, unix=None, port=28780, body=None):
         h = {'Host': 'files.kelliher.info'}
         if user:
             h['Cookie'] = f'user={user}'
         h.update(headers or {})
-        c = UnixConnection(unix) if unix else http.client.HTTPConnection('127.0.0.1', 28780, timeout=10)
-        c.request(method, path, headers=h)
+        c = UnixConnection(unix) if unix else http.client.HTTPConnection('127.0.0.1', port, timeout=10)
+        c.request(method, path, body=body, headers=h)
         r = c.getresponse()
         body = r.read()
         result = (r.status, {k.lower(): v for k, v in r.getheaders()}, body)
@@ -494,6 +530,67 @@ api_bind_addr = "127.0.0.1:28393"
         status, _, _ = self.get('/_media/api/item/wfh/private.mp4')
         self.assertNotEqual(status, 200)
         self.assertEqual(self.get('/_media/app/home', user=None)[0], 401)
+
+    def bearer(self, path, token='tv-alice', method='GET', headers=None, port=28780, body=None):
+        return self.get(path, user=None, method=method, port=port, body=body,
+                        headers={'Authorization': f'Bearer {token}', **(headers or {})})
+
+    def test_21_the_tv_client_reads_objects_renditions_and_the_app_with_its_token(self):
+        import json
+        self.authz_seen.clear()
+        status, h, body = self.bearer('/dad/movie.mp4', headers={'Range': 'bytes=6000-6999'})
+        self.assertEqual(status, 206)
+        self.assertEqual(body, self.data[6000:7000])
+        self.safe_headers(h)
+        self.assertEqual(self.bearer('/dad/movie.mp4', method='HEAD')[0], 200)
+        self.assertTrue(self.authz_seen)
+        for seen in self.authz_seen:
+            self.assertNotIn('Authorization', seen)
+            self.assertEqual(seen.get('Remote-User'), 'alice')
+        for path in ('/_media/app/home', '/_media/api/me', '/_media/api/me/next'):
+            status, _, body = self.bearer(path)
+            self.assertEqual(status, 200, path)
+            seen = {k.lower(): v for k, v in json.loads(body)['headers']}
+            self.assertEqual(seen.get('remote-user'), 'alice', path)
+            self.assertEqual(seen.get('remote-client'), 'aguatv-tv', path)
+            self.assertNotIn('authorization', seen, path)
+        for path in ('/_media/api/me', '/_media/api/me/state'):
+            status, _, body = self.bearer(path, method='POST', body=b'{"state":"idle"}',
+                                          headers={'Content-Type': 'application/json'})
+            self.assertEqual(status, 200, path)
+            echoed = json.loads(body)
+            self.assertEqual((echoed['method'], echoed['body']), ('POST', '{"state":"idle"}'), path)
+        self.denied(self.bearer('/wfh/private.mp4'))
+        self.denied(self.bearer('/dad/movie.mp4', token='tv-bob'))
+
+    def test_22_a_token_reaches_nothing_else(self):
+        for method, path in [('POST', '/dad/movie.mp4'), ('PUT', '/dad/movie.mp4'), ('GET', '/dad/'),
+                             ('GET', '/'), ('GET', '/_files/view?uri=%2Fdad%2Fmovie.mp4'),
+                             ('GET', '/_files/authz'), ('GET', '/_media/api/screens'),
+                             ('POST', '/_media/api/screens/s1/cast'), ('GET', '/_media/api/item/dad/movie.mp4'),
+                             ('GET', '/_media/api/lib/dad/'), ('PUT', '/_media/api/me/state'),
+                             ('POST', '/_media/api/me/next'), ('POST', '/_media/app/home'),
+                             ('DELETE', '/_media/api/me')]:
+            status, h, body = self.bearer(path, method=method)
+            self.assertEqual(status, 403, (method, path))
+            self.assertNotIn(b'PRIVATE_', body)
+            self.assertNotIn(self.data[:64], body)
+        for token in ('kcal-alice', 'tv-service'):
+            for method, path in [('GET', '/dad/movie.mp4'), ('GET', '/_media/app/home'), ('POST', '/_media/api/me/state')]:
+                self.assertEqual(self.bearer(path, token=token, method=method)[0], 403, (token, path))
+        self.denied(self.bearer('/dad/movie.mp4', token='forged'))
+        forged = {'Remote-Principal': 'human', 'Remote-Client': 'aguatv-tv', 'Remote-User': 'alice'}
+        self.denied(self.bearer('/dad/movie.mp4', token='forged', headers=forged))
+        self.assertEqual(self.get('/_media/api/me/state', user='alice', method='POST',
+                                  headers={'Authorization': 'Bearer kcal-alice', **forged})[0], 403)
+
+    def test_23_without_bearer_clients_a_token_is_refused_even_with_a_session(self):
+        for method, path in [('GET', '/dad/movie.mp4'), ('GET', '/_media/app/home'), ('POST', '/_media/api/me/state')]:
+            status, h, body = self.get(path, method=method, port=28781,
+                                       headers={'Authorization': 'Bearer tv-alice'})
+            self.assertEqual(status, 403, path)
+            self.assertNotIn(self.data[:64], body)
+        self.assertEqual(self.get('/dad/movie.mp4', port=28781, headers={'Range': 'bytes=0-9'})[0], 206)
 
     def test_98_first_auth_transport_error_has_policy(self):
         self.auth.shutdown()

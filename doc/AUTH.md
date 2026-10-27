@@ -81,7 +81,7 @@ through one hostname breaks one of them.
 | Hostname | Garage endpoint | Port | Auth |
 |---|---|---|---|
 | `s3.kelliher.info` | S3 API | 3900 | **SigV4 only.** No Authelia, deliberately. |
-| `files.kelliher.info` | web, on `/run/kweb-gluck-files-garage/sock`, reached only by Caddy after `/_files/authz` | socket | **Authelia only**, and the bearer bypass is explicitly closed. Then the gateway decides per path, per request |
+| `files.kelliher.info` | web, on `/run/kweb-gluck-files-garage/sock`, reached only by Caddy after `/_files/authz` | socket | **Authelia**, or a token verified at the edge for a listed client (see "Verified bearer tokens"); the unverified bearer bypass stays closed. Then the gateway decides per path, per request |
 
 ### `s3.kelliher.info`: `requireAuth = false` is the correct setting
 
@@ -138,6 +138,36 @@ without those two lines, Authorization: Bearer anything-at-all  -> 200 + content
 with them,               Authorization: Bearer anything-at-all  -> 403
 with them,               no session, no header                  -> 401 (Authelia)
 ```
+
+## Verified bearer tokens, since 2026-10-27
+
+The bypass above trusted a header nobody checked. What replaced it on the
+platform is the opposite: with `trustsRemoteHeadersOrBearer`, kelliher-web sends
+a request whose Authorization is exactly `Bearer <token>` to `kweb-bearer`,
+which verifies the token against Authelia, admits only the listed clients, takes
+the name and groups from userinfo, and stamps `Remote-Principal` and
+`Remote-Client` after stripping any a client sent. A refused token never
+reaches this site's routes.
+
+`services.gluck-files.bearerClients` opts files in, one client at a time (today
+`aguatv-tv`, the Fire TV, signed in by device code). Empty, the default, keeps
+the hand-written `respond @bearer 403` exactly as above. Not empty,
+`lib/media-route.nix` replaces it with a narrow allow, still ahead of every
+route:
+
+| caller | may |
+|---|---|
+| `Remote-Principal: human`, `Remote-Client` listed | GET and HEAD of an object (not a listing, nothing under `/_`) |
+| the same | GET and HEAD of `/_media/`, `/_media/app/*`, `/_media/static/*`, `/_media/r/*`, `/_media/api/me[/*]` |
+| the same | POST of exactly `/_media/api/me` and `/_media/api/me/state` |
+| anything else with `Authorization: Bearer` | 403 |
+
+Then Authorization is stripped, so the lister, Garage and juglar never see the
+token. The lister ACL decides objects for the token's person exactly as for a
+session; on this branch Authelia's access_control for the domain is not
+consulted, so the ACL is the only gate, and it denies by default.
+`test_media_stack.py` tests 21 to 23 hold all of this, including a site with no
+bearer clients.
 
 ## The bucket boundary does work too
 

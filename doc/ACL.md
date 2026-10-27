@@ -77,9 +77,8 @@ the safe reading is "something is wrong", not "nobody".
 
 `bearerBypass` stays **off**. The gateway does not verify JWTs, so switching it
 on would put an unauthenticated path in front of the only thing deciding access.
-The site also closes it by hand with `respond @bearer 403`, which makes the
-switch ineffective rather than merely inadvisable. That is the September 5
-incident, and the lines are belt and braces on purpose.
+That is the September 5 incident. Tokens verified at the edge are a different
+thing, admitted narrowly per client: see `AUTH.md`, "Verified bearer tokens".
 
 ## The model
 

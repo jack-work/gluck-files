@@ -41,8 +41,9 @@ Behind Authelia exactly as the rest of the site, `requireAuth = true`.
 
 **`bearerBypass` stays off.** The lister does not verify JWTs, so switching the
 bypass on would put an unauthenticated path in front of it. That is the
-September 5 incident. The site's `respond @bearer 403` makes it ineffective
-rather than merely inadvisable.
+September 5 incident. Tokens verified at the edge reach the lister only as
+Remote-User and Remote-Groups, for the routes `AUTH.md` lists under "Verified
+bearer tokens".
 
 ## Which bucket
 
