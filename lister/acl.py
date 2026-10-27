@@ -94,7 +94,7 @@ def canonical_object_uri(uri):
 
 
 MEDIA_REV = re.compile(r"^[0-9a-f]{12}$")
-MEDIA_FILE = re.compile(r"^[A-Za-z0-9_-]+\.(m3u8|m4s|mp4)$")
+MEDIA_FILE = re.compile(r"^([A-Za-z0-9_-]+\.(m3u8|m4s|mp4)|poster\.jpg)$")
 
 
 def media_request(uri, method):

@@ -27,6 +27,12 @@ class Parse(unittest.TestCase):
             media_request(f'/_media/r/dad/a%20b.mp3/{REV}/128_00001.m4s', 'GET'),
             ('read', 'dad/a b.mp3', f'/dad/a%20b.mp3/{REV}/128_00001.m4s'))
         self.assertEqual(
+            media_request(f'/_media/r/dad/film.mp4/{REV}/poster.jpg', 'GET'),
+            ('read', 'dad/film.mp4', f'/dad/film.mp4/{REV}/poster.jpg'))
+        for name in ('poster.png', 'x.jpg', 'poster.jpg.m4s.jpg', 'Poster.jpg'):
+            with self.assertRaises(BadPath, msg=name):
+                media_request(f'/_media/r/dad/film.mp4/{REV}/{name}', 'GET')
+        self.assertEqual(
             media_request(f'/_media/r/dad/x.mp3/{REV}/master.m3u8?t=1', 'HEAD'),
             ('read', 'dad/x.mp3', f'/dad/x.mp3/{REV}/master.m3u8'))
 
