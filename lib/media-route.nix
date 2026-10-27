@@ -83,6 +83,19 @@ let
         }
       }
     }
+    @media_app path /_media/ /_media/app/* /_media/api/me /_media/api/me/* /_media/api/screens /_media/api/screens/*
+    handle @media_app {
+      route {
+        request_header -X-Files-URI
+        @media_screen_cookie header_regexp screen Cookie (?:^|;\s*)aguatv_screen=([A-Za-z0-9_-]{20,64})(?:;|$)
+        @media_no_screen_cookie not header_regexp Cookie (?:^|;\s*)aguatv_screen=([A-Za-z0-9_-]{20,64})(?:;|$)
+        request_header @media_screen_cookie Cookie "aguatv_screen={re.screen.1}"
+        request_header @media_no_screen_cookie -Cookie
+        reverse_proxy ${media.apiAddress} {
+          header_up -Authorization
+        }
+      }
+    }
     @media_other path /_media /_media/*
     respond @media_other 404
   '';
