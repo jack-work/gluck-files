@@ -710,6 +710,11 @@
                   ${import ./lib/media-route.nix {
                     listerAddress = "@LISTER@";
                     garageAddress = "@GARAGE@";
+                    media = {
+                      webRoot = pkgs.emptyDirectory;
+                      bucketHost = "media.kelliher.info";
+                      apiAddress = "@MEDIAAPI@";
+                    };
                   }}
                   reverse_proxy @LISTER@
                 }

@@ -24,6 +24,7 @@ CFG = ROOT / 'garage.toml'
 SPACE_KEY = 'cs7641/quizzes/sl-quiz/SL Unit Quiz_ CS7641_ Machine Learning - Fall 2026.pdf'
 WEB_SOCKET = ROOT / 'web' / 'sock'
 LISTER_SOCKET = ROOT / 'lister.sock'
+MEDIA_API_SOCKET = ROOT / 'media-api.sock'
 IDENTITY = {'alice': ('alice', ''), 'bob': ('bob', ''), 'admin': ('admin', 'files-admin')}
 
 
@@ -68,7 +69,8 @@ class Auth(http.server.BaseHTTPRequestHandler):
         if self.path.split('?', 1)[0] != '/api/authz/forward-auth':
             self.send_error(404)
             return
-        user = self.headers.get('Cookie', '').removeprefix('user=')
+        pairs = [c.strip().split('=', 1) for c in self.headers.get('Cookie', '').split(';') if '=' in c]
+        user = dict(pairs).get('user', '')
         identity = IDENTITY.get(user)
         self.send_response(200 if identity else 401)
         if identity:
@@ -77,6 +79,31 @@ class Auth(http.server.BaseHTTPRequestHandler):
         self.end_headers()
     def log_message(self, *_):
         pass
+
+
+class Echo(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        import json
+        body = json.dumps({'path': self.path, 'headers': [[k, v] for k, v in self.headers.items()]}).encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *_):
+        pass
+
+
+class UnixHTTPServer(http.server.ThreadingHTTPServer):
+    address_family = socket.AF_UNIX
+
+    def server_bind(self):
+        self.socket.bind(self.server_address)
+
+    def get_request(self):
+        request, _ = self.socket.accept()
+        return request, ('unix', 0)
 
 
 class Stack(unittest.TestCase):
@@ -158,8 +185,11 @@ api_bind_addr = "127.0.0.1:28393"
         threading.Thread(target=cls.lister.run, daemon=True).start()
         cls.auth = http.server.ThreadingHTTPServer(('127.0.0.1', 28091), Auth)
         threading.Thread(target=cls.auth.serve_forever, daemon=True).start()
+        cls.echo = UnixHTTPServer(str(MEDIA_API_SOCKET), Echo)
+        threading.Thread(target=cls.echo.serve_forever, daemon=True).start()
         caddyfile = ROOT / 'Caddyfile'
         caddyfile.write_text(pathlib.Path(os.environ['MEDIA_CADDYFILE']).read_text()
+                             .replace('@MEDIAAPI@', f'unix/{MEDIA_API_SOCKET}')
                              .replace('@LISTER@', f'unix/{LISTER_SOCKET}')
                              .replace('@GARAGE@', f'unix/{WEB_SOCKET}'))
         cls.caddy = start([CADDY, 'run', '--config', str(caddyfile),
@@ -168,6 +198,7 @@ api_bind_addr = "127.0.0.1:28393"
     @classmethod
     def tearDownClass(cls):
         cls.auth.shutdown()
+        cls.echo.shutdown()
         cls.lister.close()
         for process in reversed(PROCESSES):
             if process.poll() is None:
@@ -427,6 +458,42 @@ api_bind_addr = "127.0.0.1:28393"
         self.assertEqual(h['content-type'],'text/html')
         self.assertNotIn('content-disposition',h)
         self.denied(self.get('/wfh/private.mp4',headers={'Sec-Fetch-Dest':'document'}))
+
+    def echoed(self, path, cookie, extra=None):
+        import json
+        status, _, body = self.get(path, user=None, headers={'Cookie': cookie, **(extra or {})})
+        self.assertEqual(status, 200, (path, body[:200]))
+        seen = json.loads(body)
+        headers = {}
+        for k, v in seen['headers']:
+            headers.setdefault(k.lower(), []).append(v)
+        return seen['path'], headers
+
+    def test_18_the_app_and_screen_routes_reach_the_backend_with_the_screen_cookie_alone(self):
+        token = 'Abc_' + 'x' * 28 + '-9'
+        forged = {'Authorization': 'Basic YWxpY2U6eA==', 'X-Files-URI': '/wfh/private.mp4', 'Remote-User': 'admin'}
+        for path in ('/_media/', '/_media/app/home', '/_media/app/home.js', '/_media/api/me', '/_media/api/me/next', '/_media/api/screens', '/_media/api/screens/s1/cast'):
+            seen, h = self.echoed(path, f'authelia_session=SESSION_SECRET; user=alice; aguatv_screen={token}; other=1', forged)
+            self.assertEqual(seen, path)
+            self.assertEqual(h.get('remote-user'), ['alice'], path)
+            self.assertEqual(h.get('cookie'), [f'aguatv_screen={token}'], path)
+            for name in ('authorization', 'x-files-uri'):
+                self.assertNotIn(name, h, (path, name))
+            self.assertNotIn('SESSION_SECRET', repr(h), path)
+
+    def test_19_a_malformed_or_missing_screen_cookie_sends_no_cookie_at_all(self):
+        for cookie in ('user=alice; authelia_session=SESSION_SECRET',
+                       'user=alice; aguatv_screen=short',
+                       'user=alice; aguatv_screen=' + 'x' * 30 + '$%',
+                       'user=alice; aguatv_screen=' + 'x' * 65,
+                       'user=alice; xaguatv_screen=' + 'x' * 32):
+            _, h = self.echoed('/_media/api/screens', cookie)
+            self.assertNotIn('cookie', h, cookie)
+
+    def test_20_the_object_routes_still_need_the_lister(self):
+        status, _, _ = self.get('/_media/api/item/wfh/private.mp4')
+        self.assertNotEqual(status, 200)
+        self.assertEqual(self.get('/_media/app/home', user=None)[0], 401)
 
     def test_98_first_auth_transport_error_has_policy(self):
         self.auth.shutdown()
