@@ -20,7 +20,7 @@ let
         not {
           ${bearerCaller}
           method GET HEAD
-          path /_media/ /_media/app/* /_media/static/* /_media/r/* /_media/api/me /_media/api/me/*
+          path /_media/ /_media/app/* /_media/static/* /_media/r/* /_media/api/me /_media/api/me/* /_media/api/item/* /_media/api/lib/*
         }
         not {
           ${bearerCaller}

@@ -158,7 +158,7 @@ route:
 | caller | may |
 |---|---|
 | `Remote-Principal: human`, `Remote-Client` listed | GET and HEAD of an object (not a listing, nothing under `/_`) |
-| the same | GET and HEAD of `/_media/`, `/_media/app/*`, `/_media/static/*`, `/_media/r/*`, `/_media/api/me[/*]` |
+| the same | GET and HEAD of `/_media/`, `/_media/app/*`, `/_media/static/*`, `/_media/r/*`, `/_media/api/me[/*]`, `/_media/api/item/*`, `/_media/api/lib/*` |
 | the same | POST of exactly `/_media/api/me` and `/_media/api/me/state` |
 | anything else with `Authorization: Bearer` | 403 |
 

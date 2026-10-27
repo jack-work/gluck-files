@@ -172,7 +172,7 @@ api_bind_addr = "127.0.0.1:28393"
             'LISTER_BUCKETS': 'files', 'LISTER_ROOT_DOMAIN': '.kelliher.info',
             'LISTER_ENDPOINT': 'http://127.0.0.1:28390', 'LISTER_REGION': 'test',
             'AWS_ACCESS_KEY_ID': key, 'AWS_SECRET_ACCESS_KEY': secret,
-            'AWS_EC2_METADATA_DISABLED': 'true',
+            'AWS_EC2_METADATA_DISABLED': 'true', 'LISTER_MEDIA': '1',
         })
         sys.path.insert(0, os.environ['LISTER_SRC'])
         cls.L = importlib.import_module('lister')
@@ -562,13 +562,22 @@ api_bind_addr = "127.0.0.1:28393"
             self.assertEqual((echoed['method'], echoed['body']), ('POST', '{"state":"idle"}'), path)
         self.denied(self.bearer('/wfh/private.mp4'))
         self.denied(self.bearer('/dad/movie.mp4', token='tv-bob'))
+        for path in ('/_media/api/item/dad/movie.mp4', '/_media/api/lib/dad/'):
+            for method in ('GET', 'HEAD'):
+                status, _, body = self.bearer(path, method=method)
+                self.assertEqual(status, 200, (method, path))
+            seen = {k.lower(): v for k, v in json.loads(self.bearer(path)[2])['headers']}
+            self.assertEqual(seen.get('remote-user'), 'alice', path)
+            self.assertNotIn('authorization', seen, path)
+            self.assertNotEqual(self.bearer(path.replace('/dad/', '/wfh/'))[0], 200, path)
+            self.assertNotEqual(self.bearer(path, token='tv-bob')[0], 200, path)
 
     def test_22_a_token_reaches_nothing_else(self):
         for method, path in [('POST', '/dad/movie.mp4'), ('PUT', '/dad/movie.mp4'), ('GET', '/dad/'),
                              ('GET', '/'), ('GET', '/_files/view?uri=%2Fdad%2Fmovie.mp4'),
                              ('GET', '/_files/authz'), ('GET', '/_media/api/screens'),
-                             ('POST', '/_media/api/screens/s1/cast'), ('GET', '/_media/api/item/dad/movie.mp4'),
-                             ('GET', '/_media/api/lib/dad/'), ('PUT', '/_media/api/me/state'),
+                             ('POST', '/_media/api/screens/s1/cast'), ('POST', '/_media/api/item/dad/movie.mp4'),
+                             ('POST', '/_media/api/lib/dad/'), ('PUT', '/_media/api/me/state'),
                              ('POST', '/_media/api/me/next'), ('POST', '/_media/app/home'),
                              ('DELETE', '/_media/api/me')]:
             status, h, body = self.bearer(path, method=method)
