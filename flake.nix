@@ -670,6 +670,7 @@
           acl = suite "acl" "test_acl.py";
           gateway = suite "gateway" "test_gateway.py";
           authz = suite "authz" "test_authz.py";
+          decision-log = suite "decision-log" "test_decision_log.py";
           media-authz = suite "media-authz" "test_media_authz.py";
           viewer = suite "viewer" "test_viewer.py";
           bucket-for = suite "bucket-for" "test_lister.py";

@@ -126,6 +126,25 @@ pass through Python, and the browser never holds a capability URL: the presigned
 bucket response is `private, no-store`, nosniff and sandboxed.
 Details and the edge-cache evidence: [`MEDIA.md`](./MEDIA.md).
 
+## The decision log
+
+Both authorizers, `/_files/authz` and `/_files/authz-media`, write one line per
+decision to the lister's journal, the shape netmon's files-acl source parses:
+
+```
+INFO allowed read files/dad/a.mp3 to alice
+INFO denied list files/wfh/ to alice
+INFO denied read files/dad/a.mp3 to -
+```
+
+`-` is a request with no Remote-User. The key and the user are percent-escaped,
+so a key cannot carry a newline or a second ` to `, and a forged line cannot
+be written. The query, headers and tokens are never logged. Every denial is
+logged; an allowed decision is logged the first time for each (user, bucket,
+key, action) and then at most once per ten minutes, so a video's ranges do not
+flood the journal. `test_decision_log.py` pins the format against netmon's
+pattern.
+
 ## The admin CLI
 
 Authority is **ssh to spain**, which is already the strongest credential on the

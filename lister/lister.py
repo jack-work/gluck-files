@@ -23,8 +23,11 @@ import logging
 import os
 import socket
 import sys
+import threading
+import time
+from collections import OrderedDict
 from datetime import timezone
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import boto3
 from botocore.config import Config
@@ -85,6 +88,37 @@ def caller():
 def caller_groups():
     raw = request.headers.get("Remote-Groups") or ""
     return [g.strip() for g in raw.split(",") if g.strip()]
+
+
+SHOWN_SAFE = "/._-~@+"
+ALLOWED_QUIET_SECONDS = 600
+ALLOWED_SEEN_MAX = 4096
+_allowed_seen = OrderedDict()
+_allowed_lock = threading.Lock()
+
+
+def shown(text):
+    return quote(text or "-", safe=SHOWN_SAFE) or "-"
+
+
+def decided(allowed, action, bucket, key, user):
+    line = "%s %s %s/%s to %s" % (
+        "allowed" if allowed else "denied", action, shown(bucket), shown(key), shown(user))
+    if allowed:
+        now = time.monotonic()
+        with _allowed_lock:
+            last = _allowed_seen.get((user, bucket, key, action))
+            if last is not None and now - last < ALLOWED_QUIET_SECONDS:
+                return
+            _allowed_seen[(user, bucket, key, action)] = now
+            _allowed_seen.move_to_end((user, bucket, key, action))
+            while len(_allowed_seen) > ALLOWED_SEEN_MAX:
+                _allowed_seen.popitem(last=False)
+    log.info("%s", line)
+
+
+def asked_path():
+    return unquote((request.headers.get("X-Forwarded-Uri") or "").partition("?")[0].lstrip("/"))
 
 
 def bucket_for(host):
@@ -328,20 +362,25 @@ def media_viewer():
 def authorise_object():
     headers = {"Cache-Control": "no-store"}
     user = caller()
+    bucket = bucket_for(request.host)
+    def deny(status=403, key=None):
+        decided(False, "read", bucket, asked_path() if key is None else key, user)
+        return Response("unauthenticated\n" if status == 401 else "denied\n", status=status, headers=headers)
     if not user:
-        return Response("unauthenticated\n", status=401, headers=headers)
-    if bucket_for(request.host) is None:
-        return Response("denied\n", status=403, headers=headers)
+        return deny(401)
+    if bucket is None:
+        return deny()
     if (request.headers.get("X-Forwarded-Uri") or "").startswith("/_media/"):
-        return Response("denied\n", status=403, headers=headers)
+        return deny()
     if request.headers.get("X-Forwarded-Method") not in ("GET", "HEAD"):
-        return Response("denied\n", status=403, headers=headers)
+        return deny()
     try:
         key, uri = canonical_object_uri(request.headers.get("X-Forwarded-Uri"))
     except (BadPath, ValueError):
-        return Response("denied\n", status=403, headers=headers)
+        return deny()
     if not ACL.allows(user, caller_groups(), key, "read"):
-        return Response("denied\n", status=403, headers=headers)
+        return deny(key=key)
+    decided(True, "read", bucket, key, user)
     if (request.headers.get("Sec-Fetch-Dest") == "document" and plays_in_viewer(key)
             and "download=1" not in request.headers.get("X-Forwarded-Uri", "").partition("?")[2].split("&")):
         headers["Location"] = viewer_href(uri)
@@ -354,16 +393,21 @@ def authorise_object():
 def authorise_media():
     headers = {"Cache-Control": "no-store"}
     user = caller()
+    bucket = bucket_for(request.host)
+    def deny(status=403, action="read", key=None):
+        decided(False, action, bucket, asked_path() if key is None else key, user)
+        return Response("unauthenticated\n" if status == 401 else "denied\n", status=status, headers=headers)
     if not user:
-        return Response("unauthenticated\n", status=401, headers=headers)
-    if not MEDIA or bucket_for(request.host) is None:
-        return Response("denied\n", status=403, headers=headers)
+        return deny(401)
+    if not MEDIA or bucket is None:
+        return deny()
     try:
         perm, key, echo = media_request(request.headers.get("X-Forwarded-Uri"), request.headers.get("X-Forwarded-Method"))
     except (BadPath, ValueError):
-        return Response("denied\n", status=403, headers=headers)
+        return deny()
     if not ACL.allows(user, caller_groups(), key, perm):
-        return Response("denied\n", status=403, headers=headers)
+        return deny(action=perm, key=key)
+    decided(True, perm, bucket, key, user)
     headers["X-Files-URI"] = echo
     return Response("", status=200, headers=headers)
 
