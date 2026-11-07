@@ -346,6 +346,20 @@
               '';
             };
 
+            clientPrefixes = lib.mkOption {
+              type = lib.types.attrsOf (lib.types.nullOr (lib.types.listOf lib.types.str));
+              default = { };
+              example = { media-device = [ "books/" ]; aguatv-tv = null; };
+              description = ''
+                For each bearer client, the key prefixes its tokens may read,
+                as objects, renditions, items and libraries. A prefix ends in
+                "/" and matches the canonical key from its start, so "books/"
+                does not cover "bookstuff/". null is the whole bucket, said
+                explicitly. Every client in bearerClients needs an entry; a
+                request from a client without one is refused.
+              '';
+            };
+
             adminGroup = lib.mkOption {
               type = lib.types.str;
               default = "files-admin";
@@ -517,6 +531,7 @@
                 LISTER_ACL_DB = cfg.aclDatabase;
                 LISTER_ADMIN_GROUP = cfg.adminGroup;
                 LISTER_MEDIA = if cfg.media.enable then "1" else "0";
+                LISTER_CLIENT_PREFIXES_FILE = "${pkgs.writeText "gluck-files-client-prefixes.json" (builtins.toJSON cfg.clientPrefixes)}";
                 AWS_EC2_METADATA_DISABLED = "true";
               };
               serviceConfig = {
@@ -641,6 +656,16 @@
                   + "Aliasing the graveyard onto the website bucket would make it "
                   + "browsable, which is the boundary doc/AUTH.md relies on.";
               }
+              {
+                assertion = lib.all (c: cfg.clientPrefixes ? ${c}) cfg.bearerClients;
+                message = "gluck-files: every bearer client needs a clientPrefixes entry (a list, or null for the whole bucket); missing: "
+                  + toString (lib.filter (c: !(cfg.clientPrefixes ? ${c})) cfg.bearerClients);
+              }
+              {
+                assertion = lib.all (p: builtins.match "[^/][^\n]*/" p != null && !(lib.hasInfix "//" p))
+                  (lib.concatLists (lib.filter (l: l != null) (lib.attrValues cfg.clientPrefixes)));
+                message = "gluck-files: a clientPrefixes entry must be a non-empty key prefix ending in \"/\", without a leading \"/\" or \"//\".";
+              }
             ];
           };
         };
@@ -671,6 +696,7 @@
           gateway = suite "gateway" "test_gateway.py";
           authz = suite "authz" "test_authz.py";
           decision-log = suite "decision-log" "test_decision_log.py";
+          client-prefixes = suite "client-prefixes" "test_client_prefixes.py";
           media-authz = suite "media-authz" "test_media_authz.py";
           viewer = suite "viewer" "test_viewer.py";
           bucket-for = suite "bucket-for" "test_lister.py";
@@ -746,7 +772,7 @@
                 auto_https off
                 admin off
               }
-              ${site 28780 [ "aguatv-tv" ]}
+              ${site 28780 [ "aguatv-tv" "media-device" ]}
               ${site 28781 [ ]}
             '';
           } ''

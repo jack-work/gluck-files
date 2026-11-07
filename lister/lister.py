@@ -19,6 +19,7 @@ Admin is not a special case in code: `group:files-admin` holds read/list/write
 on the root, which inherits everywhere. One mechanism, one code path.
 """
 
+import json
 import logging
 import os
 import socket
@@ -49,6 +50,7 @@ MAX_KEYS = int(os.environ.get("LISTER_MAX_KEYS", "2000"))
 ACL_DB = os.environ.get("LISTER_ACL_DB", "/var/lib/gluck-files-lister/acl.db")
 MAX_QUEUE = int(os.environ.get("LISTER_MAX_QUEUE", "8"))
 MEDIA = os.environ.get("LISTER_MEDIA") == "1"
+CLIENT_PREFIXES_FILE = os.environ.get("LISTER_CLIENT_PREFIXES_FILE", "")
 MEDIA_PLAYER_EXTENSIONS = (".mp3", ".m4a", ".m4b", ".aac", ".wav", ".oga", ".ogg", ".opus", ".flac")
 
 with open(TEMPLATE, encoding="utf-8") as fh:
@@ -119,6 +121,59 @@ def decided(allowed, action, bucket, key, user):
 
 def asked_path():
     return unquote((request.headers.get("X-Forwarded-Uri") or "").partition("?")[0].lstrip("/"))
+
+
+def valid_prefix(prefix):
+    if not isinstance(prefix, str) or len(prefix) < 2 or not prefix.endswith("/") or prefix.startswith("/"):
+        return False
+    try:
+        return normalise(prefix) == prefix
+    except BadPath:
+        return False
+
+
+def load_client_prefixes(path):
+    if not path:
+        return {}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        if not isinstance(data, dict):
+            raise ValueError("not an object")
+    except (OSError, ValueError) as e:
+        logging.getLogger("gluck-files").error("client prefixes unreadable, every bearer client is refused: %s", e)
+        return {}
+    scopes = {}
+    for client, prefixes in data.items():
+        if prefixes is None:
+            scopes[client] = None
+            continue
+        if not isinstance(prefixes, list):
+            logging.getLogger("gluck-files").error("client %s: prefixes are not a list, it is refused", client)
+            scopes[client] = []
+            continue
+        kept = []
+        for prefix in prefixes:
+            if valid_prefix(prefix):
+                kept.append(prefix)
+            else:
+                logging.getLogger("gluck-files").error("client %s: prefix %r dropped", client, prefix)
+        scopes[client] = kept
+    return scopes
+
+
+CLIENT_PREFIXES = load_client_prefixes(CLIENT_PREFIXES_FILE)
+
+
+def client_scope():
+    client = (request.headers.get("Remote-Client") or "").strip()
+    if not client:
+        return None
+    return CLIENT_PREFIXES.get(client, [])
+
+
+def in_scope(key, scope):
+    return scope is None or any(key.startswith(p) for p in scope)
 
 
 def bucket_for(host):
@@ -378,7 +433,7 @@ def authorise_object():
         key, uri = canonical_object_uri(request.headers.get("X-Forwarded-Uri"))
     except (BadPath, ValueError):
         return deny()
-    if not ACL.allows(user, caller_groups(), key, "read"):
+    if not in_scope(key, client_scope()) or not ACL.allows(user, caller_groups(), key, "read"):
         return deny(key=key)
     decided(True, "read", bucket, key, user)
     if (request.headers.get("Sec-Fetch-Dest") == "document" and plays_in_viewer(key)
@@ -405,7 +460,7 @@ def authorise_media():
         perm, key, echo = media_request(request.headers.get("X-Forwarded-Uri"), request.headers.get("X-Forwarded-Method"))
     except (BadPath, ValueError):
         return deny()
-    if not ACL.allows(user, caller_groups(), key, perm):
+    if not in_scope(key, client_scope()) or not ACL.allows(user, caller_groups(), key, perm):
         return deny(action=perm, key=key)
     decided(True, perm, bucket, key, user)
     headers["X-Files-URI"] = echo

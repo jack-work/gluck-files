@@ -31,6 +31,7 @@ TOKENS = {
     'tv-bob': ('bob', '', 'human', 'aguatv-tv'),
     'kcal-alice': ('alice', '', 'human', 'kcal'),
     'tv-service': ('aguatv-tv', '', 'service', 'aguatv-tv'),
+    'mdev-alice': ('alice', '', 'human', 'media-device'),
 }
 
 
@@ -173,7 +174,9 @@ api_bind_addr = "127.0.0.1:28393"
             'LISTER_ENDPOINT': 'http://127.0.0.1:28390', 'LISTER_REGION': 'test',
             'AWS_ACCESS_KEY_ID': key, 'AWS_SECRET_ACCESS_KEY': secret,
             'AWS_EC2_METADATA_DISABLED': 'true', 'LISTER_MEDIA': '1',
+            'LISTER_CLIENT_PREFIXES_FILE': str(ROOT / 'prefixes.json'),
         })
+        (ROOT / 'prefixes.json').write_text('{"aguatv-tv": null, "media-device": ["books/"]}')
         sys.path.insert(0, os.environ['LISTER_SRC'])
         cls.L = importlib.import_module('lister')
         cls.s3 = cls.L.s3
@@ -189,6 +192,9 @@ api_bind_addr = "127.0.0.1:28393"
             'dad/folder/index.html': (b'PRIVATE_INDEX', 'text/html'),
             'error.html': (b'PRIVATE_ERROR', 'text/html'),
             SPACE_KEY: (b'LIVE_SPACE_KEY_FIXTURE', 'application/pdf'),
+            'books/catalog.json': (b'{"books": ["books/a.epub"]}', 'application/json'),
+            'books/a.epub': (b'BOOK_A', 'application/epub+zip'),
+            'bookstuff/x.epub': (b'PRIVATE_BOOKSTUFF', 'application/epub+zip'),
         }
         for name in ['a b', 'a+b', 'a#b', 'a?b', 'a;b', 'caf\u00e9', 'cafe\u0301', 'A', 'a', 'percent%file']:
             cls.objects[f'dad/{name}.mp3'] = (name.encode(), 'audio/mpeg')
@@ -249,6 +255,9 @@ api_bind_addr = "127.0.0.1:28393"
     def setUp(self):
         self.L.ACL.grant('user:alice', 'dad/', 'read', 'fixture')
         self.L.ACL.grant('user:alice', SPACE_KEY, 'read', 'fixture')
+        for prefix in ('books/', 'bookstuff/'):
+            self.L.ACL.grant('user:alice', prefix, 'read', 'fixture')
+            self.L.ACL.grant('user:alice', prefix, 'list', 'fixture')
         type(self).mode = None
 
     def get(self, path, user='alice', method='GET', headers=None, unix=None, port=28780, body=None):
@@ -600,6 +609,29 @@ api_bind_addr = "127.0.0.1:28393"
             self.assertEqual(status, 403, path)
             self.assertNotIn(self.data[:64], body)
         self.assertEqual(self.get('/dad/movie.mp4', port=28781, headers={'Range': 'bytes=0-9'})[0], 206)
+
+    def test_24_the_device_client_reads_its_prefixes_and_nothing_else(self):
+        status, h, body = self.bearer('/books/catalog.json', token='mdev-alice')
+        self.assertEqual((status, body), (200, b'{"books": ["books/a.epub"]}'))
+        self.safe_headers(h)
+        self.assertEqual(self.bearer('/books/a.epub', token='mdev-alice')[2], b'BOOK_A')
+        self.assertEqual(self.bearer('/books/a.epub', token='mdev-alice', method='HEAD')[0], 200)
+        for path in ('/bookstuff/x.epub', '/dad/movie.mp4', '/wfh/private.mp4'):
+            self.denied(self.bearer(path, token='mdev-alice'))
+            self.assertNotIn(b'PRIVATE_BOOKSTUFF', self.bearer(path, token='mdev-alice')[2])
+        for path in ('/_media/api/item/dad/movie.mp4', '/_media/api/item/bookstuff/x.epub',
+                     '/_media/api/lib/dad/', '/_media/api/lib/bookstuff/', '/_media/api/lib/'):
+            self.assertEqual(self.bearer(path, token='mdev-alice')[0], 403, path)
+        for path in ('/_media/api/item/books/a.epub', '/_media/api/lib/books/', '/_media/app/home', '/_media/api/me'):
+            self.assertEqual(self.bearer(path, token='mdev-alice')[0], 200, path)
+        for path in ('/books/', '/'):
+            self.assertEqual(self.bearer(path, token='mdev-alice')[0], 403, path)
+
+    def test_25_a_client_supplied_remote_client_is_ignored(self):
+        self.assertEqual(self.get('/bookstuff/x.epub', headers={'Remote-Client': 'media-device'})[2], b'PRIVATE_BOOKSTUFF')
+        self.assertEqual(self.get('/dad/movie.mp4', headers={'Remote-Client': 'media-device', 'Range': 'bytes=0-9'})[0], 206)
+        self.assertEqual(self.bearer('/dad/movie.mp4', token='tv-alice', headers={'Remote-Client': 'media-device', 'Range': 'bytes=0-9'})[0], 206)
+        self.denied(self.bearer('/books/a.epub', token='forged', headers={'Remote-Client': 'media-device', 'Remote-Principal': 'human'}))
 
     def test_98_first_auth_transport_error_has_policy(self):
         self.auth.shutdown()

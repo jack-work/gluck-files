@@ -169,6 +169,26 @@ consulted, so the ACL is the only gate, and it denies by default.
 `test_media_stack.py` tests 21 to 23 hold all of this, including a site with no
 bearer clients.
 
+### Each client sees only its prefixes
+
+`services.gluck-files.clientPrefixes` names, for every bearer client, the key
+prefixes its tokens may reach: objects, renditions, `/_media/api/item/<key>` and
+`/_media/api/lib/<prefix>`. The lister reads `Remote-Client` (stamped by the
+edge after it strips the client's own) and refuses a key outside the list
+before it consults the ACL, so a token for Gluck on the Kindle reaches
+`books/` and nothing else even though Gluck himself reaches the whole bucket.
+
+- A prefix ends in `/` and matches the canonical key from its start: `books/`
+  covers `books/a.epub`, never `bookstuff/x`.
+- A library is allowed only when the prefix asked for lies inside an allowed
+  one; the bucket root is never inside.
+- `null` is the whole bucket, said explicitly. A client with no entry, or a
+  file that cannot be read, is refused outright. The module refuses to build
+  when a bearer client has no entry or a prefix is malformed.
+- No `Remote-Client` is the browser, whose session is unchanged.
+- The media app (`/_media/`, `/_media/app/*`, `/_media/api/me*`) names no key,
+  so it is gated by the edge alone.
+
 ## The bucket boundary does work too
 
 `files` is marked as a website; `graveyard` is not. Garage answers **404** on

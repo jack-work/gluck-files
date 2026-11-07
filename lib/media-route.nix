@@ -2,8 +2,7 @@
 let
   bearerCaller = ''
     header Remote-Principal human
-    header Remote-Client ${builtins.concatStringsSep " " bearerClients}
-  '';
+  '' + builtins.concatStringsSep "" (map (c: "  header Remote-Client ${c}\n") bearerClients);
 
   bearerGate =
     if bearerClients == [ ] then ''
