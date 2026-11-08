@@ -11,6 +11,7 @@ TMP = tempfile.TemporaryDirectory()
 PREFIXES = pathlib.Path(TMP.name) / 'prefixes.json'
 PREFIXES.write_text(json.dumps({
     'media-device': ['books/', 'cs7641/media/', '/rooted/', 'noslash', 'a//b/', '', 42],
+    'scoped': ['books/', 'cs7641/media/', 'cs7641/audio/', '30d/voice/', 'caf\u00e9 a/'],
     'aguatv-tv': None,
     'broken': 'books/',
 }))
@@ -64,6 +65,13 @@ class Gate(unittest.TestCase):
     def media(self, uri, client=None):
         return self.ask(uri, client, endpoint='/_files/authz-media')
 
+    def lib(self, uri, client=None, user='gluck'):
+        h = {'X-Forwarded-Uri': uri, 'X-Forwarded-Method': 'GET', 'Remote-User': user, 'Remote-Groups': 'files-admin'}
+        if client is not None:
+            h['Remote-Client'] = client
+        r = self.client.get('/_files/authz-media', base_url='http://files.kelliher.info', headers=h)
+        return r.status_code, r.headers.get('X-Files-Scope')
+
     def test_device_reads_inside_its_prefixes_only(self):
         self.assertEqual(self.ask('/books/catalog.json', 'media-device'), 200)
         self.assertEqual(self.ask('/books/a/b.epub', 'media-device'), 200)
@@ -79,13 +87,49 @@ class Gate(unittest.TestCase):
         self.assertEqual(self.media(f'/_media/r/cs7641/media/x.mp4/{REV}/s_00000.m4s', 'media-device'), 200)
         self.assertEqual(self.media(f'/_media/r/wfh/x.mp4/{REV}/s_00000.m4s', 'media-device'), 403)
 
-    def test_a_library_must_sit_inside_a_prefix(self):
-        self.assertEqual(self.media('/_media/api/lib/books/', 'media-device'), 200)
-        self.assertEqual(self.media('/_media/api/lib/books/sub/', 'media-device'), 200)
-        self.assertEqual(self.media('/_media/api/lib/cs7641/media/', 'media-device'), 200)
-        for uri in ('/_media/api/lib/', '/_media/api/lib/cs7641/', '/_media/api/lib/bookstuff/',
-                    '/_media/api/lib/wfh/'):
-            self.assertEqual(self.media(uri, 'media-device'), 403, uri)
+    def test_a_library_inside_a_prefix_is_scoped_to_itself(self):
+        self.assertEqual(self.lib('/_media/api/lib/books/', 'scoped'), (200, 'books/'))
+        self.assertEqual(self.lib('/_media/api/lib/books/sub/', 'scoped'), (200, 'books/sub/'))
+        self.assertEqual(self.lib('/_media/api/lib/cs7641/media/', 'scoped'), (200, 'cs7641/media/'))
+
+    def test_a_library_above_prefixes_is_scoped_to_the_prefixes_under_it(self):
+        self.assertEqual(self.lib('/_media/api/lib/', 'scoped'),
+                         (200, 'books/ cs7641/media/ cs7641/audio/ 30d/voice/ caf%C3%A9%20a/'))
+        self.assertEqual(self.lib('/_media/api/lib/cs7641/', 'scoped'), (200, 'cs7641/media/ cs7641/audio/'))
+        self.assertEqual(self.lib('/_media/api/lib/30d/', 'scoped'), (200, '30d/voice/'))
+        self.assertEqual(self.lib('/_media/api/lib/', 'media-device'), (200, 'books/ cs7641/media/'))
+
+    def test_a_library_beside_or_outside_every_prefix_is_refused_without_a_scope(self):
+        for uri in ('/_media/api/lib/bookstuff/', '/_media/api/lib/wfh/', '/_media/api/lib/cs/',
+                    '/_media/api/lib/cs7641/notes/', '/_media/api/lib/30d/cs7641/', '/_media/api/lib/book/'):
+            self.assertEqual(self.lib(uri, 'scoped'), (403, None), uri)
+        self.assertEqual(self.lib('/_media/api/lib/', 'kcal'), (403, None))
+        self.assertEqual(self.lib('/_media/api/lib/', 'broken'), (403, None))
+
+    def test_a_scoped_library_still_needs_the_acl(self):
+        for g in L.ACL.list_grants():
+            L.ACL.revoke(g['subject'], g['path'], g['perm'])
+        L.ACL.grant('user:gluck', 'books/', 'list', 'fixture')
+        self.assertEqual(self.lib('/_media/api/lib/books/', 'scoped'), (200, 'books/'))
+        self.assertEqual(self.lib('/_media/api/lib/', 'scoped'), (200, 'books/'))
+        self.assertEqual(self.lib('/_media/api/lib/cs7641/', 'scoped'), (403, None))
+        self.assertEqual(self.lib('/_media/api/lib/books/', 'scoped', user='mallory'), (403, None))
+        self.assertEqual(self.lib('/_media/api/lib/', 'scoped', user='mallory'), (403, None))
+
+    def test_the_browser_and_whole_bucket_clients_never_get_a_scope(self):
+        for client in (None, 'aguatv-tv'):
+            for uri in ('/_media/api/lib/', '/_media/api/lib/books/', '/_media/api/lib/wfh/'):
+                self.assertEqual(self.lib(uri, client), (200, None), (client, uri))
+        r = self.client.get('/_files/authz', base_url='http://files.kelliher.info',
+                            headers={'X-Forwarded-Uri': '/books/x', 'X-Forwarded-Method': 'GET', 'Remote-User': 'gluck',
+                                     'Remote-Groups': 'files-admin', 'Remote-Client': 'scoped'})
+        self.assertEqual(r.status_code, 200)
+        self.assertNotIn('X-Files-Scope', r.headers)
+        r = self.client.get('/_files/authz-media', base_url='http://files.kelliher.info',
+                            headers={'X-Forwarded-Uri': '/_media/api/item/books/x.mp3', 'X-Forwarded-Method': 'GET',
+                                     'Remote-User': 'gluck', 'Remote-Groups': 'files-admin', 'Remote-Client': 'scoped'})
+        self.assertEqual(r.status_code, 200)
+        self.assertNotIn('X-Files-Scope', r.headers)
 
     def test_no_client_is_the_browser_and_is_unchanged(self):
         for uri in ('/bookstuff/x', '/wfh/x.pdf', '/books/catalog.json'):
@@ -94,7 +138,7 @@ class Gate(unittest.TestCase):
 
     def test_null_is_the_whole_bucket_and_unknown_or_broken_clients_are_refused(self):
         self.assertEqual(self.ask('/wfh/x.pdf', 'aguatv-tv'), 200)
-        self.assertEqual(self.media('/_media/api/lib/', 'aguatv-tv'), 200)
+        self.assertEqual(self.lib('/_media/api/lib/', 'aguatv-tv'), (200, None))
         for client in ('kcal', 'broken', 'Media-device', 'media-device '):
             expected = 200 if client == 'media-device ' else 403
             self.assertEqual(self.ask('/books/x', client), expected, client)

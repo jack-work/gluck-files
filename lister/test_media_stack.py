@@ -620,7 +620,7 @@ api_bind_addr = "127.0.0.1:28393"
             self.denied(self.bearer(path, token='mdev-alice'))
             self.assertNotIn(b'PRIVATE_BOOKSTUFF', self.bearer(path, token='mdev-alice')[2])
         for path in ('/_media/api/item/dad/movie.mp4', '/_media/api/item/bookstuff/x.epub',
-                     '/_media/api/lib/dad/', '/_media/api/lib/bookstuff/', '/_media/api/lib/'):
+                     '/_media/api/lib/dad/', '/_media/api/lib/bookstuff/'):
             self.assertEqual(self.bearer(path, token='mdev-alice')[0], 403, path)
         for path in ('/_media/api/item/books/a.epub', '/_media/api/lib/books/', '/_media/app/home', '/_media/api/me'):
             self.assertEqual(self.bearer(path, token='mdev-alice')[0], 200, path)
@@ -632,6 +632,29 @@ api_bind_addr = "127.0.0.1:28393"
         self.assertEqual(self.get('/dad/movie.mp4', headers={'Remote-Client': 'media-device', 'Range': 'bytes=0-9'})[0], 206)
         self.assertEqual(self.bearer('/dad/movie.mp4', token='tv-alice', headers={'Remote-Client': 'media-device', 'Range': 'bytes=0-9'})[0], 206)
         self.denied(self.bearer('/books/a.epub', token='forged', headers={'Remote-Client': 'media-device', 'Remote-Principal': 'human'}))
+
+    def scope_seen(self, path, **kw):
+        import json
+        status, _, body = self.get(path, **kw)
+        if status != 200:
+            return status, None
+        seen = {k.lower(): v for k, v in json.loads(body)['headers']}
+        return status, seen.get('x-files-scope')
+
+    def test_26_a_scoped_library_reaches_juglar_with_the_lister_scope_alone(self):
+        forged = {'X-Files-Scope': 'dad/ wfh/'}
+        mdev = {'Authorization': 'Bearer mdev-alice'}
+        self.assertEqual(self.scope_seen('/_media/api/lib/', user=None, headers=mdev), (200, 'books/'))
+        self.assertEqual(self.scope_seen('/_media/api/lib/', user=None, headers={**mdev, **forged}), (200, 'books/'))
+        self.assertEqual(self.scope_seen('/_media/api/lib/books/', user=None, headers={**mdev, **forged}), (200, 'books/'))
+        self.assertEqual(self.get('/_media/api/lib/dad/', user=None, headers={**mdev, **forged})[0], 403)
+        self.assertEqual(self.get('/_media/api/lib/bookstuff/', user=None, headers={**mdev, **forged})[0], 403)
+        for path in ('/_media/api/lib/dad/', '/_media/api/lib/books/'):
+            self.assertEqual(self.scope_seen(path, headers=forged), (200, None), path)
+            self.assertEqual(self.scope_seen(path, user=None, headers={'Authorization': 'Bearer tv-alice', **forged}), (200, None), path)
+        for path in ('/_media/api/item/books/a.epub', '/_media/app/home', '/_media/api/me', '/_media/api/screens'):
+            self.assertEqual(self.scope_seen(path, headers=forged), (200, None), path)
+        self.assertEqual(self.scope_seen('/_media/api/item/books/a.epub', user=None, headers={**mdev, **forged}), (200, None))
 
     def test_98_first_auth_transport_error_has_policy(self):
         self.auth.shutdown()

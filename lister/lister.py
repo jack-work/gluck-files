@@ -176,6 +176,12 @@ def in_scope(key, scope):
     return scope is None or any(key.startswith(p) for p in scope)
 
 
+def library_scope(prefix, scope):
+    if any(prefix.startswith(p) for p in scope):
+        return [prefix]
+    return [p for p in scope if p.startswith(prefix)]
+
+
 def bucket_for(host):
     """Resolve the bucket from Host, as Garage's web endpoint does, behind an
     allowlist. Without the allowlist a forged Host would name a bucket that was
@@ -460,10 +466,19 @@ def authorise_media():
         perm, key, echo = media_request(request.headers.get("X-Forwarded-Uri"), request.headers.get("X-Forwarded-Method"))
     except (BadPath, ValueError):
         return deny()
-    if not in_scope(key, client_scope()) or not ACL.allows(user, caller_groups(), key, perm):
+    scope = client_scope()
+    groups = caller_groups()
+    shown_scope = None
+    if scope is not None and perm == "list":
+        shown_scope = [p for p in library_scope(key, scope) if ACL.allows(user, groups, p, perm)]
+        if not shown_scope:
+            return deny(action=perm, key=key)
+    elif not in_scope(key, scope) or not ACL.allows(user, groups, key, perm):
         return deny(action=perm, key=key)
     decided(True, perm, bucket, key, user)
     headers["X-Files-URI"] = echo
+    if shown_scope is not None:
+        headers["X-Files-Scope"] = " ".join(quote(p, safe="/") for p in shown_scope)
     return Response("", status=200, headers=headers)
 
 

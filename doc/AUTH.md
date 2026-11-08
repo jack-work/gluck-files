@@ -180,8 +180,17 @@ before it consults the ACL, so a token for Gluck on the Kindle reaches
 
 - A prefix ends in `/` and matches the canonical key from its start: `books/`
   covers `books/a.epub`, never `bookstuff/x`.
-- A library is allowed only when the prefix asked for lies inside an allowed
-  one; the bucket root is never inside.
+- Every library the lister allows for such a client carries `X-Files-Scope`,
+  the prefixes juglar must filter the listing to, space-separated and
+  percent-encoded like `X-Files-URI`. Inside a prefix it is the prefix asked
+  for. At the root, or a folder above allowed prefixes (`cs7641/` above
+  `cs7641/media/`), it is the allowed prefixes under it that the user may
+  list, so the TV's root gallery shows exactly the union of its prefixes. A
+  folder beside every prefix (`bookstuff/`, `cs7641/notes/`) is refused.
+  Caddy strips any client-sent `X-Files-Scope` on every route before the
+  lister's is copied, and never forwards it to Garage. juglar refuses a
+  bearer library request that arrives without it; the browser never gets
+  one.
 - `null` is the whole bucket, said explicitly. A client with no entry, or a
   file that cannot be read, is refused outright. The module refuses to build
   when a bearer client has no entry or a prefix is malformed.

@@ -31,11 +31,11 @@ let
       request_header -Authorization
     '';
 
-  authorizeAt = uri: ''
+  authorizeAt = uri: copied: ''
     request_header -X-Files-URI
     forward_auth ${listerAddress} {
       uri ${uri}
-      copy_headers X-Files-URI
+      copy_headers ${copied}
       transport http {
         dial_timeout 1s
         response_header_timeout 3s
@@ -43,8 +43,8 @@ let
     }
   '';
 
-  authorize = authorizeAt "/_files/authz";
-  authorizeMedia = authorizeAt "/_files/authz-media";
+  authorize = authorizeAt "/_files/authz" "X-Files-URI";
+  authorizeMedia = authorizeAt "/_files/authz-media" "X-Files-URI X-Files-Scope";
 
   garageObject = hostHeader: ''
     @files_bad_uri {
@@ -59,6 +59,7 @@ let
       ${if hostHeader == null then "" else "header_up Host ${hostHeader}"}
       header_up -Cookie
       header_up -Authorization
+      header_up -X-Files-Scope
       header_up -Remote-User
       header_up -Remote-Groups
       header_up -Remote-Email
@@ -132,6 +133,7 @@ let
   '';
 in
 ''
+  request_header -X-Files-Scope
   ${bearerGate}
   @files_viewer path /_files/view
   handle @files_viewer {
