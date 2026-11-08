@@ -187,6 +187,10 @@ before it consults the ACL, so a token for Gluck on the Kindle reaches
   `cs7641/media/`), it is the allowed prefixes under it that the user may
   list, so the TV's root gallery shows exactly the union of its prefixes. A
   folder beside every prefix (`bookstuff/`, `cs7641/notes/`) is refused.
+  For such a client, listing the root or a folder above its prefixes does not
+  need `list` on that folder, only on at least one allowed prefix under it;
+  each shown prefix needs its own `list`. What that reveals is the names of
+  the client's own configured prefixes, nothing else.
   Caddy strips any client-sent `X-Files-Scope` on every route before the
   lister's is copied, and never forwards it to Garage. juglar refuses a
   bearer library request that arrives without it; the browser never gets
