@@ -44,7 +44,7 @@ let
   '';
 
   authorize = authorizeAt "/_files/authz" "X-Files-URI";
-  authorizeMedia = authorizeAt "/_files/authz-media" "X-Files-URI X-Files-Scope";
+  authorizeMedia = authorizeAt "/_files/authz-media" "X-Files-URI X-Files-Scope X-Files-Subtitle-Ids X-Files-Subtitle-Master";
 
   garageObject = hostHeader: ''
     @files_bad_uri {
@@ -60,6 +60,11 @@ let
       header_up -Cookie
       header_up -Authorization
       header_up -X-Files-Scope
+      header_up -X_Files_Scope
+      header_up -X-Files-Subtitle-Ids
+      header_up -X_Files_Subtitle_Ids
+      header_up -X-Files-Subtitle-Master
+      header_up -X_Files_Subtitle_Master
       header_up -Remote-User
       header_up -Remote-Groups
       header_up -Remote-Email
@@ -98,7 +103,19 @@ let
     handle @media_rendition {
       route {
         ${authorizeMedia}
-        ${garageObject media.bucketHost}
+        @subtitle_master {
+          path /_media/r/*/master.m3u8
+          header X-Files-Subtitle-Master 1
+        }
+        handle @subtitle_master {
+          reverse_proxy ${media.apiAddress} {
+            header_up -Cookie
+            header_up -Authorization
+          }
+        }
+        handle {
+          ${garageObject media.bucketHost}
+        }
       }
     }
     @media_api path /_media/api/item/* /_media/api/lib/*
@@ -134,6 +151,11 @@ let
 in
 ''
   request_header -X-Files-Scope
+  request_header -X_Files_Scope
+  request_header -X-Files-Subtitle-Ids
+  request_header -X_Files_Subtitle_Ids
+  request_header -X-Files-Subtitle-Master
+  request_header -X_Files_Subtitle_Master
   ${bearerGate}
   @files_viewer path /_files/view
   handle @files_viewer {

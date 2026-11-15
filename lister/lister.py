@@ -38,6 +38,7 @@ from markupsafe import escape
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from acl import Acl, BadPath, canonical_object_uri, media_request, normalise
+from caption_gate import CaptionGate, ManifestUnavailable
 
 BUCKETS = frozenset(
     b for b in os.environ.get("LISTER_BUCKETS", "files").replace(",", " ").split() if b
@@ -51,6 +52,7 @@ ACL_DB = os.environ.get("LISTER_ACL_DB", "/var/lib/gluck-files-lister/acl.db")
 MAX_QUEUE = int(os.environ.get("LISTER_MAX_QUEUE", "8"))
 MEDIA = os.environ.get("LISTER_MEDIA") == "1"
 CLIENT_PREFIXES_FILE = os.environ.get("LISTER_CLIENT_PREFIXES_FILE", "")
+SUBTITLE_MANIFEST_FILE = os.environ.get("LISTER_SUBTITLE_MANIFEST", "")
 MEDIA_PLAYER_EXTENSIONS = (".mp3", ".m4a", ".m4b", ".aac", ".wav", ".oga", ".ogg", ".opus", ".flac")
 
 with open(TEMPLATE, encoding="utf-8") as fh:
@@ -475,6 +477,26 @@ def authorise_media():
             return deny(action=perm, key=key)
     elif not in_scope(key, scope) or not ACL.allows(user, groups, key, perm):
         return deny(action=perm, key=key)
+    uri = request.headers.get("X-Forwarded-Uri") or ""
+    is_rendition = uri.partition("?")[0].startswith("/_media/r/")
+    revision, name = unquote(echo).rsplit("/", 2)[-2:] if is_rendition else (None, None)
+    is_caption = is_rendition and name.startswith("captions_")
+    is_master = is_rendition and name == "master.m3u8"
+    is_item = uri.partition("?")[0].startswith("/_media/api/item/")
+    if is_caption or is_master or is_item:
+        gate = CaptionGate(SUBTITLE_MANIFEST_FILE, s3, ACL, bucket, user, groups, scope)
+        try:
+            if is_caption and not gate.allows_object(key, revision, name):
+                return deny(key=key)
+            if (is_item or is_master) and request.headers.get("X-Forwarded-Method") in ("GET", "HEAD"):
+                allowed = gate.allowed_ids(key, revision if is_master else None)
+                headers["X-Files-Subtitle-Ids"] = json.dumps(allowed, separators=(",", ":"))
+                if is_master and gate.associated_master(key, revision):
+                    headers["X-Files-Subtitle-Master"] = "1"
+        except ManifestUnavailable:
+            if is_caption:
+                return deny(key=key)
+            headers["X-Files-Subtitle-Ids"] = "[]"
     decided(True, perm, bucket, key, user)
     headers["X-Files-URI"] = echo
     if shown_scope is not None:

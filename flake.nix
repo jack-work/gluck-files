@@ -13,6 +13,7 @@
         cp ${./lister/acl.py}    $out/acl.py
         cp ${./lister/lister.py} $out/lister.py
         cp ${./lister/aclctl.py} $out/aclctl.py
+        cp ${./lister/caption_gate.py} $out/caption_gate.py
       '';
 
       # doc/LISTER.md
@@ -360,6 +361,12 @@
               '';
             };
 
+            subtitleManifestFile = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              description = "Trusted juglar subtitle associations, read-only to the lister through juglar-subtitles-read.";
+            };
+
             adminGroup = lib.mkOption {
               type = lib.types.str;
               default = "files-admin";
@@ -509,6 +516,7 @@
               group = cfg.listerUser;
             };
             users.groups.${cfg.listerUser} = { };
+            users.groups.juglar-subtitles-read = lib.mkIf (cfg.subtitleManifestFile != null) { };
             users.users.garage.extraGroups = [ cfg.listerUser ];
 
             systemd.tmpfiles.rules = [
@@ -533,9 +541,12 @@
                 LISTER_MEDIA = if cfg.media.enable then "1" else "0";
                 LISTER_CLIENT_PREFIXES_FILE = "${pkgs.writeText "gluck-files-client-prefixes.json" (builtins.toJSON cfg.clientPrefixes)}";
                 AWS_EC2_METADATA_DISABLED = "true";
+              } // lib.optionalAttrs (cfg.subtitleManifestFile != null) {
+                LISTER_SUBTITLE_MANIFEST = cfg.subtitleManifestFile;
               };
               serviceConfig = {
                 ExecStart = "${listerPython}/bin/python3 ${listerSrc}/lister.py";
+                SupplementaryGroups = lib.optional (cfg.subtitleManifestFile != null) "juglar-subtitles-read";
                 StateDirectory = "gluck-files-acl";
                 StateDirectoryMode = "0750";
                 EnvironmentFile = cfg.listerCredentialsFile;
