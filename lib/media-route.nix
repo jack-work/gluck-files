@@ -114,7 +114,9 @@ let
           }
         }
         handle {
-          ${garageObject media.bucketHost}
+          route {
+            ${garageObject media.bucketHost}
+          }
         }
       }
     }
