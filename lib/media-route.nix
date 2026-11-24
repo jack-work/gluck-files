@@ -1,4 +1,4 @@
-{ listerAddress, garageAddress, s3Address ? null, uploadAddress ? null, media ? null, bearerClients ? [ ] }:
+{ listerAddress, garageAddress, s3Address ? null, s3Host ? null, uploadAddress ? null, media ? null, bearerClients ? [ ] }:
 let
   bearerCaller = ''
     header Remote-Principal human
@@ -89,14 +89,19 @@ let
 
   signedObject = ''
     @files_bad_signed {
-      not header_regexp X-Files-Signed "^/u-[a-z0-9][a-z0-9.-]*/([A-Za-z0-9._~-]|%[0-9A-F]{2})+(/([A-Za-z0-9._~-]|%[0-9A-F]{2})+)*[?][A-Za-z0-9._~%=&-]+$"
+      not header_regexp X-Files-Signed "^/u-[a-z0-9][a-z0-9.-]*/([A-Za-z0-9._~-]|%[0-9A-F]{2})+(/([A-Za-z0-9._~-]|%[0-9A-F]{2})+)*[?]([A-Za-z0-9._~%=-]+&)*X-Amz-Signature=[0-9a-f]{64}(&[A-Za-z0-9._~%=-]+)*$"
     }
     respond @files_bad_signed 502
+    @files_signed_off_path not {
+      path /users/*
+      method GET HEAD
+    }
+    respond @files_signed_off_path 502
     rewrite * {http.request.header.X-Files-Signed}
     request_header -X-Files-Signed
     request_header -X-Files-URI
     reverse_proxy ${s3Address} {
-      header_up Host {upstream_hostport}
+      header_up Host ${s3Host}
       header_up -Cookie
       header_up -Authorization
       header_up -Remote-User
