@@ -1,0 +1,16 @@
+body { margin: 0; font: 18px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: #faf7f2; color: #1d1a16; }
+main { max-width: 40rem; margin: 0 auto; padding: 1.25rem; }
+h1 { font-size: 1.5rem; margin: .5rem 0 1rem; }
+.pick { display: block; padding: 1.1rem; border: 2px dashed #8a6d3b; border-radius: .75rem; text-align: center; font-weight: 600; background: #fff; cursor: pointer; }
+.pick input { display: block; margin: .75rem auto 0; font-size: 1rem; max-width: 100%; }
+.hint { color: #5b5146; font-size: .95rem; }
+ul { list-style: none; padding: 0; }
+li { background: #fff; border-radius: .6rem; padding: .7rem .8rem; margin: .5rem 0; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.name { word-break: break-all; font-weight: 600; }
+.state { font-size: .95rem; color: #5b5146; }
+.bar { height: .5rem; background: #eee3d0; border-radius: .25rem; overflow: hidden; margin-top: .4rem; }
+.bar > span { display: block; height: 100%; width: 0; background: #8a6d3b; }
+li.done .state { color: #2e6b2e; } li.done .bar > span { background: #2e6b2e; }
+li.failed .state { color: #a12a1f; }
+button { font-size: 1.1rem; padding: .8rem 1.4rem; border-radius: .6rem; border: 0; background: #8a6d3b; color: #fff; }
+#summary { font-weight: 600; }

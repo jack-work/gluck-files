@@ -1,4 +1,4 @@
-{ listerAddress, garageAddress, media ? null, bearerClients ? [ ] }:
+{ listerAddress, garageAddress, uploadAddress ? null, media ? null, bearerClients ? [ ] }:
 let
   bearerCaller = ''
     header Remote-Principal human
@@ -159,6 +159,15 @@ in
   request_header -X-Files-Subtitle-Master
   request_header -X_Files_Subtitle_Master
   ${bearerGate}
+  ${if uploadAddress == null then "" else ''
+    redir /_upload /_upload/ 308
+    handle /_upload/* {
+      request_header -X-Files-URI
+      reverse_proxy ${uploadAddress} {
+        header_up -Authorization
+      }
+    }
+  ''}
   @files_viewer path /_files/view
   handle @files_viewer {
     reverse_proxy ${listerAddress}

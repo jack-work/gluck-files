@@ -14,6 +14,7 @@
         cp ${./lister/lister.py} $out/lister.py
         cp ${./lister/aclctl.py} $out/aclctl.py
         cp ${./lister/caption_gate.py} $out/caption_gate.py
+        cp ${./lister/upload.py} $out/upload.py
       '';
 
       # doc/LISTER.md
@@ -63,6 +64,7 @@
           browserPathConfig = import ./lib/media-route.nix {
             inherit (cfg) bearerClients;
             listerAddress = "unix//run/kweb/gluck-files.sock";
+            uploadAddress = "unix//run/kweb/gluck-files-upload.sock";
             garageAddress = garageWeb.dial;
             media =
               if cfg.media.enable then {
@@ -223,6 +225,21 @@
               chgrp ${cfg.listerUser} "$tmp"
               chmod 0440 "$tmp"
               mv -f "$tmp" ${cfg.listerCredentialsFile}
+
+              if ! ${garageCli} key list | grep -qw "${cfg.uploadKeyName}"; then
+                ${garageCli} key create ${cfg.uploadKeyName} >/dev/null
+              fi
+              ${garageCli} bucket allow --read --write ${cfg.bucket} --key ${cfg.uploadKeyName} >/dev/null
+              ${garageCli} bucket deny --owner ${cfg.bucket} --key ${cfg.uploadKeyName} >/dev/null 2>&1 || true
+              upload_info=$(${garageCli} key info --show-secret ${cfg.uploadKeyName})
+              tmp=$(mktemp ${cfg.uploadCredentialsFile}.XXXXXX)
+              {
+                echo "AWS_ACCESS_KEY_ID=$(echo "$upload_info" | sed -n 's/^Key ID: *//p')"
+                echo "AWS_SECRET_ACCESS_KEY=$(echo "$upload_info" | sed -n 's/^Secret key: *//p')"
+              } > "$tmp"
+              chgrp ${cfg.listerUser} "$tmp"
+              chmod 0440 "$tmp"
+              mv -f "$tmp" ${cfg.uploadCredentialsFile}
             '' + lib.optionalString cfg.media.enable ''
 
               ${garageCli} bucket website --allow -i index.html ${cfg.media.bucket}
@@ -425,6 +442,22 @@
               '';
             };
 
+            uploadKeyName = lib.mkOption {
+              type = lib.types.str;
+              default = "files-upload";
+              description = ''
+                Garage key behind https://files.<domain>/_upload/. Read and write
+                on the durable bucket, never owner. The ACL's write grant fences
+                each user to their own prefix; Garage cannot.
+              '';
+            };
+
+            uploadCredentialsFile = lib.mkOption {
+              type = lib.types.path;
+              default = "/var/lib/gluck-files-lister/upload-credentials";
+              description = "Where the bootstrap writes the upload key. Mode 0440, group listerUser.";
+            };
+
             listerCredentialsFile = lib.mkOption {
               type = lib.types.path;
               default = "/var/lib/gluck-files-lister/credentials";
@@ -555,6 +588,48 @@
             ] ++ lib.optional cfg.media.enable
               "d ${builtins.dirOf cfg.media.credentialsFile} 0700 garage garage -";
 
+            systemd.services.gluck-files-upload = {
+              description = "browser uploads into each user's own prefix of the ${cfg.bucket} bucket";
+              after = [ "gluck-files-bootstrap.service" ];
+              requires = [ "gluck-files-bootstrap.service" ];
+              environment = {
+                UPLOAD_BUCKET = cfg.bucket;
+                UPLOAD_ENDPOINT = "http://127.0.0.1:${toString cfg.ports.s3}";
+                UPLOAD_REGION = cfg.region;
+                UPLOAD_ACL_DB = cfg.aclDatabase;
+                UPLOAD_ORIGIN = "https://files.${baseDomain}";
+                UPLOAD_PAGE_DIR = "${./upload-page}";
+                AWS_EC2_METADATA_DISABLED = "true";
+              };
+              serviceConfig = {
+                ExecStart = "${listerPython}/bin/python3 ${listerSrc}/upload.py";
+                StateDirectory = "gluck-files-acl";
+                StateDirectoryMode = "0750";
+                EnvironmentFile = cfg.uploadCredentialsFile;
+                User = cfg.listerUser;
+                Group = cfg.listerUser;
+                Restart = "on-failure";
+                RestartSec = 5;
+                MemoryMax = "256M";
+                CPUQuota = "50%";
+                NoNewPrivileges = true;
+                PrivateTmp = true;
+                PrivateDevices = true;
+                ProtectSystem = "strict";
+                ProtectHome = true;
+                ProtectKernelTunables = true;
+                ProtectKernelModules = true;
+                ProtectControlGroups = true;
+                RestrictAddressFamilies = [ "AF_INET" "AF_UNIX" ];
+                RestrictNamespaces = true;
+                LockPersonality = true;
+                MemoryDenyWriteExecute = true;
+                SystemCallFilter = [ "@system-service" ];
+                SystemCallArchitectures = "native";
+                CapabilityBoundingSet = "";
+              };
+            };
+
             systemd.services.gluck-files-lister = {
               description = "ACL gateway for the ${cfg.bucket} bucket";
               after = [ "gluck-files-bootstrap.service" ];
@@ -635,13 +710,14 @@
               bearerClients = cfg.bearerClients;
               requiredGroups = [ "files-admin" ];
               proxySocket = "gluck-files-lister.service";
+              activatedBackends.upload.service = "gluck-files-upload.service";
               backendSockets = {
                 garage = { service = "garage.service"; owner = "garage"; };
               } // lib.optionalAttrs cfg.media.enable {
                 media = { service = cfg.media.service; owner = cfg.media.user; };
               };
               extraConfig = browserPathConfig;
-              beforeAuthConfig = import ./lib/media-document-policy.nix
+              beforeAuthConfig = import ./lib/upload-policy.nix + import ./lib/media-document-policy.nix
                 + lib.optionalString cfg.media.enable (import ./lib/media-player-policy.nix { host = "files.${baseDomain}"; });
               responseHeaders = mediaHeaders;
             };

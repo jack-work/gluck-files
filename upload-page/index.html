@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Upload to your folder</title>
+<link rel="stylesheet" href="/_upload/app.css">
+</head>
+<body>
+<main>
+  <h1>Upload to your folder</h1>
+  <p id="who">Checking your sign-in…</p>
+  <label class="pick" id="pickLabel" hidden>
+    Choose photos, videos or contacts
+    <input id="pick" type="file" multiple accept="image/*,video/*,.vcf,text/vcard,text/x-vcard">
+  </label>
+  <p class="hint" id="hint" hidden>Keep this page open until every file says Done. If the connection drops, tap Retry: finished parts are kept.</p>
+  <ul id="files"></ul>
+  <p id="summary" role="status"></p>
+  <button id="retry" type="button" hidden>Retry</button>
+  <p><a id="folder" hidden>Open your folder</a></p>
+</main>
+<script src="/_upload/app.js"></script>
+</body>
+</html>
