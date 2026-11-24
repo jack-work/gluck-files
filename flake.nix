@@ -264,6 +264,8 @@
           };
         in
         {
+          imports = [ ./nix/provision.nix ];
+
           options.services.gluck-files = {
             enable = lib.mkEnableOption "gluck-files: Garage object storage behind kelliher-web";
 

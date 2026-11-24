@@ -177,6 +177,10 @@ class Acl:
         if not subject.startswith(("user:", "group:")):
             raise ValueError("subject must be user:<name> or group:<name>")
         path = normalise(path)
+        if path == "users/" or path.startswith("users/"):
+            owner = path.split("/")[1] if path.count("/") >= 2 else ""
+            if not owner or subject != f"user:{owner}":
+                raise ValueError("users/<name>/ is reserved: only user:<name> may hold a grant there")
         now = int(now if now is not None else time.time())
         with self._lock:
             self._db.execute(
