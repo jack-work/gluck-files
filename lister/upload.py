@@ -14,6 +14,7 @@ from botocore.exceptions import ClientError
 from flask import Flask, Response, request
 
 from acl import Acl, BadPath, normalise
+from place import Places, Unplaced
 
 BUCKET = os.environ.get("UPLOAD_BUCKET", "files")
 ENDPOINT = os.environ.get("UPLOAD_ENDPOINT", "http://127.0.0.1:3900")
@@ -44,13 +45,16 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = PART_BYTES + 1024
 log = logging.getLogger("gluck-files-upload")
 ACL = Acl(ACL_DB)
-s3 = boto3.client(
-    "s3",
-    endpoint_url=ENDPOINT,
-    region_name=REGION,
-    config=Config(signature_version="s3v4", retries={"max_attempts": 3, "mode": "standard"},
-                  connect_timeout=3, read_timeout=60),
-)
+S3_CONFIG = Config(signature_version="s3v4", retries={"max_attempts": 3, "mode": "standard"},
+                   connect_timeout=3, read_timeout=60)
+s3 = boto3.client("s3", endpoint_url=ENDPOINT, region_name=REGION, config=S3_CONFIG)
+PLACES = Places(s3, BUCKET, ENDPOINT, REGION, S3_CONFIG,
+                keys_dir=os.environ.get("FILES_USER_KEYS", ""),
+                provision_socket=os.environ.get("FILES_PROVISION_SOCKET", ""))
+
+
+def place(key, ensure=False):
+    return PLACES.at(BUCKET, key, ensure)
 
 
 def refuse(status, why):
@@ -98,16 +102,18 @@ def owned_upload(user, groups, key, upload_id):
     if not key.startswith(home(user)) or not may_write(user, groups, key):
         return False
     try:
-        s3.list_parts(Bucket=BUCKET, Key=key, UploadId=upload_id, MaxParts=1)
-    except ClientError:
+        client, bucket, inner = place(key)
+        client.list_parts(Bucket=bucket, Key=inner, UploadId=upload_id, MaxParts=1)
+    except (ClientError, Unplaced):
         return False
     return True
 
 
 def received(key, upload_id):
     parts, marker = [], 0
+    client, bucket, inner = place(key)
     while True:
-        r = s3.list_parts(Bucket=BUCKET, Key=key, UploadId=upload_id, PartNumberMarker=marker)
+        r = client.list_parts(Bucket=bucket, Key=inner, UploadId=upload_id, PartNumberMarker=marker)
         parts += [{"PartNumber": p["PartNumber"], "ETag": p["ETag"], "Size": p["Size"]} for p in r.get("Parts", [])]
         if not r.get("IsTruncated"):
             return parts
@@ -119,8 +125,9 @@ def free_key(user, name):
     stem, ext = os.path.splitext(name)
     for i in range(100):
         key = f"{home(user)}uploads/{day}/{stem}{'' if i == 0 else f' ({i})'}{ext}"
+        client, bucket, inner = place(key)
         try:
-            s3.head_object(Bucket=BUCKET, Key=key)
+            client.head_object(Bucket=bucket, Key=inner)
         except ClientError as e:
             if e.response.get("Error", {}).get("Code") in ("404", "NoSuchKey", "NotFound"):
                 return key
@@ -185,12 +192,18 @@ def start():
     if not may_write(user, groups, f"{home(user)}uploads/{name}"):
         log.info("denied start %s for %s", name, user)
         return refuse(403, "no upload rights")
+    try:
+        place(home(user), ensure=True)
+    except (Unplaced, OSError) as e:
+        log.error("no bucket for %s: %s", user, e)
+        return refuse(503, "your folder isn't ready yet, try again in a minute")
     key = free_key(user, name)
     if key is None:
         return refuse(409, "too many files with that name today")
     if not may_write(user, groups, key):
         return refuse(403, "no upload rights")
-    r = s3.create_multipart_upload(Bucket=BUCKET, Key=key, **stored_as(name))
+    client, bucket, inner = place(key)
+    r = client.create_multipart_upload(Bucket=bucket, Key=inner, **stored_as(name))
     log.info("started %s for %s, %d bytes", key, user, size)
     return ok({"key": key, "id": r["UploadId"], "partBytes": PART_BYTES})
 
@@ -219,7 +232,8 @@ def part():
     data = request.get_data(cache=False)
     if not data or len(data) > PART_BYTES:
         return refuse(400, "bad part size")
-    s3.upload_part(Bucket=BUCKET, Key=key, UploadId=upload_id, PartNumber=n, Body=data)
+    client, bucket, inner = place(key)
+    client.upload_part(Bucket=bucket, Key=inner, UploadId=upload_id, PartNumber=n, Body=data)
     return ok({"n": n, "size": len(data)})
 
 
@@ -235,7 +249,8 @@ def complete():
         return refuse(409, "parts missing")
     if not isinstance(size, int) or sum(p["Size"] for p in got) != size or size > MAX_UPLOAD_BYTES:
         return refuse(409, "size does not match")
-    s3.complete_multipart_upload(Bucket=BUCKET, Key=key, UploadId=upload_id, MultipartUpload={
+    client, bucket, inner = place(key)
+    client.complete_multipart_upload(Bucket=bucket, Key=inner, UploadId=upload_id, MultipartUpload={
         "Parts": [{"PartNumber": p["PartNumber"], "ETag": p["ETag"]} for p in got]})
     log.info("completed %s for %s, %d bytes", key, user, size)
     return ok({"key": key, "size": size})
@@ -248,7 +263,8 @@ def abort():
     key, upload_id = body.get("key"), body.get("id")
     if not owned_upload(user, groups, key, upload_id):
         return refuse(404, "no such upload")
-    s3.abort_multipart_upload(Bucket=BUCKET, Key=key, UploadId=upload_id)
+    client, bucket, inner = place(key)
+    client.abort_multipart_upload(Bucket=bucket, Key=inner, UploadId=upload_id)
     return ok({"aborted": key})
 
 
@@ -256,6 +272,12 @@ def abort():
 def upstream(err):
     log.error("garage: %s", err)
     return refuse(502, "storage unavailable, try again")
+
+
+@app.errorhandler(Unplaced)
+def unplaced(err):
+    log.error("unplaced: %s", err)
+    return refuse(503, "storage unavailable, try again")
 
 
 @app.errorhandler(413)

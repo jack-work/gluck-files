@@ -39,6 +39,7 @@ from markupsafe import escape
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from acl import Acl, BadPath, canonical_object_uri, media_request, normalise
 from caption_gate import CaptionGate, ManifestUnavailable
+from place import Places, Unplaced
 
 BUCKETS = frozenset(
     b for b in os.environ.get("LISTER_BUCKETS", "files").replace(",", " ").split() if b
@@ -72,17 +73,16 @@ if ACL.is_fresh() and ADMIN_GROUP:
     for _p in ("read", "list", "write"):
         ACL.grant(f"group:{ADMIN_GROUP}", "", _p, "bootstrap")
 
-s3 = boto3.client(
-    "s3",
-    endpoint_url=ENDPOINT,
-    region_name=REGION,
-    config=Config(
-        signature_version="s3v4",
-        retries={"max_attempts": 2, "mode": "standard"},
-        connect_timeout=3,
-        read_timeout=15,
-    ),
+S3_CONFIG = Config(
+    signature_version="s3v4",
+    retries={"max_attempts": 2, "mode": "standard"},
+    connect_timeout=3,
+    read_timeout=15,
 )
+s3 = boto3.client("s3", endpoint_url=ENDPOINT, region_name=REGION, config=S3_CONFIG)
+PLACES = Places(s3, os.environ.get("LISTER_SHARED_BUCKET", "files"), ENDPOINT, REGION, S3_CONFIG,
+                keys_dir=os.environ.get("FILES_USER_KEYS", ""),
+                provision_socket=os.environ.get("FILES_PROVISION_SOCKET", ""))
 
 def caller():
     """The authenticated user, or None. Absence is refusal, not anonymity."""
@@ -230,19 +230,24 @@ def parent_of(prefix):
 
 def listing(bucket, prefix):
     dirs, files, truncated, token = [], [], False, None
+    try:
+        client, where, inner = PLACES.at(bucket, prefix)
+    except Unplaced:
+        return dirs, files, truncated, 0
+    outer = PLACES.outer(bucket, prefix)
     while True:
-        kw = {"Bucket": bucket, "Prefix": prefix, "Delimiter": "/", "MaxKeys": 1000}
+        kw = {"Bucket": where, "Prefix": inner, "Delimiter": "/", "MaxKeys": 1000}
         if token:
             kw["ContinuationToken"] = token
-        page = s3.list_objects_v2(**kw)
+        page = client.list_objects_v2(**kw)
 
         for cp in page.get("CommonPrefixes", []):
-            name = cp["Prefix"][len(prefix):].rstrip("/")
+            name = cp["Prefix"][len(inner):].rstrip("/")
             if name:
-                dirs.append({"name": name, "href": "/" + cp["Prefix"]})
+                dirs.append({"name": name, "href": "/" + outer + cp["Prefix"]})
 
         for obj in page.get("Contents", []):
-            key = obj["Key"]
+            key = outer + obj["Key"]
             if key == prefix or key.endswith("/"):
                 continue
             files.append(
@@ -284,7 +289,7 @@ def plays_in_viewer(key):
 
 
 def viewer_href(uri):
-    if MEDIA and uri.lower().endswith(MEDIA_PLAYER_EXTENSIONS):
+    if MEDIA and uri.lower().endswith(MEDIA_PLAYER_EXTENSIONS) and not uri.startswith("/users/"):
         return "/_media/play" + uri
     return "/_files/view?uri=" + quote(uri, safe="")
 
@@ -404,8 +409,9 @@ def media_viewer():
     if not ACL.allows(user, caller_groups(), key, "read"):
         abort(403)
     try:
-        meta = s3.head_object(Bucket=bucket, Key=key)
-    except ClientError:
+        client, where, inner = PLACES.at(bucket, key)
+        meta = client.head_object(Bucket=where, Key=inner)
+    except (ClientError, Unplaced):
         abort(404)
     kind = PLAYER_TYPES.get(meta.get("ContentType"))
     return render_template_string(
@@ -448,7 +454,13 @@ def authorise_object():
             and "download=1" not in request.headers.get("X-Forwarded-Uri", "").partition("?")[2].split("&")):
         headers["Location"] = viewer_href(uri)
         return Response("", status=303, headers=headers)
-    headers["X-Files-URI"] = uri
+    if PLACES.outer(bucket, key):
+        try:
+            headers["X-Files-Signed"] = PLACES.signed_get(bucket, key, request.headers.get("X-Forwarded-Method"))
+        except Unplaced:
+            return deny(404, key=key)
+    else:
+        headers["X-Files-URI"] = uri
     return Response("", status=200, headers=headers)
 
 
@@ -468,6 +480,8 @@ def authorise_media():
         perm, key, echo = media_request(request.headers.get("X-Forwarded-Uri"), request.headers.get("X-Forwarded-Method"))
     except (BadPath, ValueError):
         return deny()
+    if key.startswith("users/"):
+        return deny(action=perm, key=key)
     scope = client_scope()
     groups = caller_groups()
     shown_scope = None

@@ -1,4 +1,4 @@
-{ listerAddress, garageAddress, uploadAddress ? null, media ? null, bearerClients ? [ ] }:
+{ listerAddress, garageAddress, s3Address ? null, uploadAddress ? null, media ? null, bearerClients ? [ ] }:
 let
   bearerCaller = ''
     header Remote-Principal human
@@ -33,6 +33,7 @@ let
 
   authorizeAt = uri: copied: ''
     request_header -X-Files-URI
+    request_header -X-Files-Signed
     forward_auth ${listerAddress} {
       uri ${uri}
       copy_headers ${copied}
@@ -43,7 +44,7 @@ let
     }
   '';
 
-  authorize = authorizeAt "/_files/authz" "X-Files-URI";
+  authorize = authorizeAt "/_files/authz" (if s3Address == null then "X-Files-URI" else "X-Files-URI X-Files-Signed");
   authorizeMedia = authorizeAt "/_files/authz-media" "X-Files-URI X-Files-Scope X-Files-Subtitle-Ids X-Files-Subtitle-Master";
 
   garageObject = hostHeader: ''
@@ -75,6 +76,35 @@ let
       }
       @files_errors status 4xx 5xx
       handle_response @files_errors {
+        copy_response_headers {
+          include Content-Range
+        }
+        respond "" {rp.status_code}
+      }
+      handle_response {
+        copy_response
+      }
+    }
+  '';
+
+  signedObject = ''
+    @files_bad_signed {
+      not header_regexp X-Files-Signed "^/u-[a-z0-9][a-z0-9.-]*/([A-Za-z0-9._~-]|%[0-9A-F]{2})+(/([A-Za-z0-9._~-]|%[0-9A-F]{2})+)*[?][A-Za-z0-9._~%=&-]+$"
+    }
+    respond @files_bad_signed 502
+    rewrite * {http.request.header.X-Files-Signed}
+    request_header -X-Files-Signed
+    request_header -X-Files-URI
+    reverse_proxy ${s3Address} {
+      header_up Host {upstream_hostport}
+      header_up -Cookie
+      header_up -Authorization
+      header_up -Remote-User
+      header_up -Remote-Groups
+      header_up -Remote-Email
+      header_up -Remote-Name
+      @files_signed_errors status 3xx 4xx 5xx
+      handle_response @files_signed_errors {
         copy_response_headers {
           include Content-Range
         }
@@ -179,7 +209,19 @@ in
   handle @files_object {
     route {
       ${authorize}
-      ${garageObject null}
+      ${if s3Address == null then garageObject null else ''
+        @files_signed header X-Files-Signed *
+        handle @files_signed {
+          route {
+            ${signedObject}
+          }
+        }
+        handle {
+          route {
+            ${garageObject null}
+          }
+        }
+      ''}
     }
   }
 ''

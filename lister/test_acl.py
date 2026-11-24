@@ -130,6 +130,24 @@ class Allows(unittest.TestCase):
         self.assertTrue(self.acl.allows("admin", ["files-admin"], "anything/at/all", "read"))
         self.assertTrue(self.acl.allows("admin", ["files-admin"], "", "read"))
 
+    def test_no_root_or_group_grant_reaches_a_users_home(self):
+        for p in ("read", "list", "write"):
+            self.acl.grant("group:files-admin", "", p, "admin")
+            self.acl.grant("user:mom", "", p, "admin")
+        self.assertFalse(self.acl.allows("admin", ["files-admin"], "users/mom/x.jpg", "read"))
+        self.assertFalse(self.acl.allows("admin", ["files-admin"], "users/mom/", "list"))
+        self.assertFalse(self.acl.allows("admin", ["files-admin"], "users/", "list"))
+        self.assertFalse(self.acl.allows("mom", [], "users/mom/x.jpg", "read"))
+        self.assertTrue(self.acl.allows("admin", ["files-admin"], "notes/x", "read"))
+
+    def test_only_the_owner_row_opens_a_users_home(self):
+        self.acl.grant("user:mom", "users/mom/", "read", "admin")
+        self.assertTrue(self.acl.allows("mom", [], "users/mom/a/b.jpg", "read"))
+        self.assertFalse(self.acl.allows("mom", [], "users/mom/a/b.jpg", "write"))
+        self.assertFalse(self.acl.allows("kid", [], "users/mom/a/b.jpg", "read"))
+        self.assertFalse(self.acl.allows("mom", [], "users/kid/b.jpg", "read"))
+        self.assertFalse(self.acl.allows("mom", [], "users/", "list"))
+
     def test_grant_normalises_the_stored_path(self):
         self.acl.grant("user:dad", "/dad//", "read", "admin")
         self.assertEqual(self.acl.list_grants()[0]["path"], "dad/")

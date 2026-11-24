@@ -15,6 +15,7 @@
         cp ${./lister/aclctl.py} $out/aclctl.py
         cp ${./lister/caption_gate.py} $out/caption_gate.py
         cp ${./lister/upload.py} $out/upload.py
+        cp ${./lister/place.py} $out/place.py
       '';
 
       # doc/LISTER.md
@@ -61,11 +62,16 @@
           everyBucket = allBuckets ++ cfg.privateBuckets;
 
           garageWeb = config.services.kelliher-web.sites.gluck-files.backendSockets.garage;
+          userBucketsEnv = lib.optionalAttrs cfg.userBuckets.enable {
+            FILES_USER_KEYS = cfg.userBuckets.keysDir;
+            FILES_PROVISION_SOCKET = cfg.userBuckets.socket;
+          };
           browserPathConfig = import ./lib/media-route.nix {
             inherit (cfg) bearerClients;
             listerAddress = "unix//run/kweb/gluck-files.sock";
             uploadAddress = "unix//run/kweb/gluck-files-upload.sock";
             garageAddress = garageWeb.dial;
+            s3Address = "127.0.0.1:${toString cfg.ports.s3}";
             media =
               if cfg.media.enable then {
                 webRoot = cfg.media.webRoot;
@@ -602,7 +608,7 @@
                 UPLOAD_ORIGIN = "https://files.${baseDomain}";
                 UPLOAD_PAGE_DIR = "${./upload-page}";
                 AWS_EC2_METADATA_DISABLED = "true";
-              };
+              } // userBucketsEnv;
               serviceConfig = {
                 ExecStart = "${listerPython}/bin/python3 ${listerSrc}/upload.py";
                 StateDirectory = "gluck-files-acl";
@@ -648,8 +654,9 @@
                 LISTER_ADMIN_GROUP = cfg.adminGroup;
                 LISTER_MEDIA = if cfg.media.enable then "1" else "0";
                 LISTER_CLIENT_PREFIXES_FILE = "${pkgs.writeText "gluck-files-client-prefixes.json" (builtins.toJSON cfg.clientPrefixes)}";
+                LISTER_SHARED_BUCKET = cfg.bucket;
                 AWS_EC2_METADATA_DISABLED = "true";
-              } // lib.optionalAttrs (cfg.subtitleManifestFile != null) {
+              } // userBucketsEnv // lib.optionalAttrs (cfg.subtitleManifestFile != null) {
                 LISTER_SUBTITLE_MANIFEST = cfg.subtitleManifestFile;
               };
               serviceConfig = {

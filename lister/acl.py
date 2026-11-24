@@ -240,6 +240,12 @@ class Acl:
             prefixes = ancestors(path)
         except BadPath:
             return False
+        if prefixes[-1].startswith("users/"):
+            owner = prefixes[-1].split("/")[1] if prefixes[-1].count("/") >= 2 else ""
+            if not owner or user != owner:
+                return False
+            subs = [f"user:{owner}"]
+            prefixes = [p for p in prefixes if p.startswith(f"users/{owner}/")]
         qs = ",".join("?" * len(subs))
         ps = ",".join("?" * len(prefixes))
         with self._lock:
