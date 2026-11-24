@@ -68,6 +68,10 @@ def caller():
     return user, groups
 
 
+def home(user):
+    return f"users/{user}/"
+
+
 def safe_name(name):
     name = unicodedata.normalize("NFC", os.path.basename(str(name or "").replace("\\", "/")))
     name = re.sub(r"[^\w.\- ()]+", "_", name).strip(" .")
@@ -91,7 +95,7 @@ def may_write(user, groups, key):
 def owned_upload(user, groups, key, upload_id):
     if not isinstance(key, str) or not isinstance(upload_id, str) or not upload_id:
         return False
-    if not key.startswith(f"{user}/") or not may_write(user, groups, key):
+    if not key.startswith(home(user)) or not may_write(user, groups, key):
         return False
     try:
         s3.list_parts(Bucket=BUCKET, Key=key, UploadId=upload_id, MaxParts=1)
@@ -114,7 +118,7 @@ def free_key(user, name):
     day = time.strftime("%Y-%m-%d")
     stem, ext = os.path.splitext(name)
     for i in range(100):
-        key = f"{user}/uploads/{day}/{stem}{'' if i == 0 else f' ({i})'}{ext}"
+        key = f"{home(user)}uploads/{day}/{stem}{'' if i == 0 else f' ({i})'}{ext}"
         try:
             s3.head_object(Bucket=BUCKET, Key=key)
         except ClientError as e:
@@ -162,7 +166,7 @@ def static(name, mime):
 @app.get("/_upload/api/me")
 def me():
     user, groups = caller()
-    return ok({"user": user, "folder": f"{user}/", "writable": may_write(user, groups, f"{user}/uploads/x"),
+    return ok({"user": user, "folder": home(user), "writable": may_write(user, groups, f"{home(user)}uploads/x"),
                "partBytes": PART_BYTES})
 
 
@@ -178,7 +182,7 @@ def start():
     name = safe_name(body.get("name"))
     if os.path.splitext(name)[1].lower() not in TYPES:
         return refuse(415, "this kind of file can't be uploaded here")
-    if not may_write(user, groups, f"{user}/uploads/{name}"):
+    if not may_write(user, groups, f"{home(user)}uploads/{name}"):
         log.info("denied start %s for %s", name, user)
         return refuse(403, "no upload rights")
     key = free_key(user, name)
