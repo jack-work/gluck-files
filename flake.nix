@@ -57,6 +57,7 @@
           websiteBuckets = [ cfg.bucket ];
           mediaBuckets = lib.optional cfg.media.enable cfg.media.bucket;
           allBuckets = websiteBuckets ++ [ cfg.graveyardBucket ] ++ mediaBuckets;
+          everyBucket = allBuckets ++ cfg.privateBuckets;
 
           garageWeb = config.services.kelliher-web.sites.gluck-files.backendSockets.garage;
           browserPathConfig = import ./lib/media-route.nix {
@@ -102,6 +103,15 @@
 
           lifecycleFile = pkgs.writeText "gluck-files-lifecycle.json" lifecycleJson;
 
+          privateLifecycleFile = pkgs.writeText "gluck-files-private-lifecycle.json" (builtins.toJSON {
+            Rules = [{
+              ID = "abort-incomplete-multipart";
+              Status = "Enabled";
+              Filter.Prefix = "";
+              AbortIncompleteMultipartUpload.DaysAfterInitiation = 1;
+            }];
+          });
+
           listerTemplate = listerTemplateFor pkgs;
 
           bootstrap = pkgs.writeShellApplication {
@@ -140,7 +150,7 @@
               fi
 
               # ── buckets ───────────────────────────────────────────────────
-              for bucket in ${lib.concatStringsSep " " allBuckets}; do
+              for bucket in ${lib.concatStringsSep " " everyBucket}; do
                 if ! ${garageCli} bucket list | grep -qw "$bucket"; then
                   ${garageCli} bucket create "$bucket"
                 fi
@@ -164,7 +174,7 @@
               if ! ${garageCli} key list | grep -qw "${cfg.bootstrapKeyName}"; then
                 ${garageCli} key create ${cfg.bootstrapKeyName} >/dev/null
               fi
-              for bucket in ${lib.concatStringsSep " " allBuckets}; do
+              for bucket in ${lib.concatStringsSep " " everyBucket}; do
                 ${garageCli} bucket allow --read --write --owner \
                   "$bucket" --key ${cfg.bootstrapKeyName} >/dev/null
               done
@@ -181,6 +191,15 @@
                   s3api put-bucket-lifecycle-configuration \
                   --bucket "$bucket" \
                   --lifecycle-configuration "file://${lifecycleFile}"
+              done
+
+              private_buckets=(${lib.escapeShellArgs cfg.privateBuckets})
+              for bucket in "''${private_buckets[@]}"; do
+                ${garageCli} bucket website --deny "$bucket" >/dev/null
+                aws --endpoint-url http://127.0.0.1:${toString cfg.ports.s3} \
+                  s3api put-bucket-lifecycle-configuration \
+                  --bucket "$bucket" \
+                  --lifecycle-configuration "file://${privateLifecycleFile}"
               done
 
               # ── the lister's key ──────────────────────────────────────────
@@ -279,6 +298,18 @@
               '';
             };
 
+
+            privateBuckets = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              default = [ ];
+              example = [ "phone" ];
+              description = ''
+                Buckets the bootstrap creates and keeps private: never a
+                website, and the only lifecycle rule aborts multipart uploads
+                left incomplete for a day. Their objects never expire.
+                Keys are granted on them by hand on the host, never in Nix.
+              '';
+            };
 
             windows = lib.mkOption {
               type = lib.types.listOf lib.types.str;
@@ -654,6 +685,11 @@
             users.groups.caddy = { };
 
             assertions = [
+              {
+                assertion = lib.all (b: !(lib.elem b allBuckets)) cfg.privateBuckets
+                  && lib.length (lib.unique cfg.privateBuckets) == lib.length cfg.privateBuckets;
+                message = "gluck-files: privateBuckets must be distinct and name none of the website, graveyard or media buckets";
+              }
               {
                 assertion = config.services.kelliher-web.baseDomains != [ ];
                 message =
