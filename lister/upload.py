@@ -25,7 +25,7 @@ PAGE_DIR = os.environ["UPLOAD_PAGE_DIR"]
 PART_BYTES = 16 * 1024 * 1024
 MAX_PARTS = 10000
 MAX_UPLOAD_BYTES = 8 * 1024 ** 3
-USER = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
+USER = re.compile(r"[a-z][a-z0-9_-]{2,31}")
 
 TYPES = {
     ".vcf": "text/vcard",
