@@ -74,6 +74,10 @@ let
       handle_response @files_substitution {
         respond 404
       }
+      @files_missing status 404
+      handle_response @files_missing {
+        error 404
+      }
       @files_errors status 4xx 5xx
       handle_response @files_errors {
         copy_response_headers {
@@ -108,6 +112,10 @@ let
       header_up -Remote-Groups
       header_up -Remote-Email
       header_up -Remote-Name
+      @files_signed_missing status 404
+      handle_response @files_signed_missing {
+        error 404
+      }
       @files_signed_errors status 3xx 4xx 5xx
       handle_response @files_signed_errors {
         copy_response_headers {
