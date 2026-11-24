@@ -15,6 +15,7 @@
         cp ${./lister/aclctl.py} $out/aclctl.py
         cp ${./lister/caption_gate.py} $out/caption_gate.py
         cp ${./lister/upload.py} $out/upload.py
+        cp ${./lister/place.py} $out/place.py
       '';
 
       # doc/LISTER.md
@@ -61,11 +62,19 @@
           everyBucket = allBuckets ++ cfg.privateBuckets;
 
           garageWeb = config.services.kelliher-web.sites.gluck-files.backendSockets.garage;
+          s3Relay = config.services.kelliher-web.sites.gluck-files.backendSockets.s3;
+          s3RelayUser = "gluck-files-s3-relay";
+          userBucketsEnv = lib.optionalAttrs cfg.userBuckets.enable {
+            FILES_USER_KEYS = cfg.userBuckets.keysDir;
+            FILES_PROVISION_SOCKET = cfg.userBuckets.socket;
+          };
           browserPathConfig = import ./lib/media-route.nix {
             inherit (cfg) bearerClients;
             listerAddress = "unix//run/kweb/gluck-files.sock";
             uploadAddress = "unix//run/kweb/gluck-files-upload.sock";
             garageAddress = garageWeb.dial;
+            s3Address = if cfg.userBuckets.enable then s3Relay.dial else null;
+            s3Host = "127.0.0.1:${toString cfg.ports.s3}";
             media =
               if cfg.media.enable then {
                 webRoot = cfg.media.webRoot;
@@ -584,6 +593,45 @@
             users.groups.${cfg.listerUser} = { };
             users.groups.juglar-subtitles-read = lib.mkIf (cfg.subtitleManifestFile != null) { };
             users.users.garage.extraGroups = [ cfg.listerUser ];
+            users.users.${s3RelayUser} = lib.mkIf cfg.userBuckets.enable {
+              isSystemUser = true;
+              group = s3RelayUser;
+            };
+            users.groups.${s3RelayUser} = lib.mkIf cfg.userBuckets.enable { };
+
+            systemd.services.gluck-files-s3-relay = lib.mkIf cfg.userBuckets.enable {
+              description = "Caddy's unix-socket way to Garage's S3 API, for presigned downloads from user buckets";
+              after = [ "garage.service" ];
+              wantedBy = [ "multi-user.target" ];
+              serviceConfig = {
+                ExecStart = "${pkgs.socat}/bin/socat UNIX-LISTEN:${s3Relay.bindPath},fork,unlink-early,mode=0666 TCP:127.0.0.1:${toString cfg.ports.s3}";
+                User = s3RelayUser;
+                Group = s3RelayUser;
+                Restart = "on-failure";
+                RestartSec = 5;
+                MemoryMax = "64M";
+                TasksMax = 64;
+                NoNewPrivileges = true;
+                PrivateTmp = true;
+                PrivateDevices = true;
+                ProtectSystem = "strict";
+                ReadWritePaths = [ s3Relay.directory ];
+                ProtectHome = true;
+                ProtectKernelTunables = true;
+                ProtectKernelModules = true;
+                ProtectControlGroups = true;
+                RestrictAddressFamilies = [ "AF_UNIX" "AF_INET" ];
+                IPAddressAllow = "localhost";
+                IPAddressDeny = "any";
+                SocketBindDeny = "any";
+                RestrictNamespaces = true;
+                LockPersonality = true;
+                MemoryDenyWriteExecute = true;
+                SystemCallFilter = [ "@system-service" ];
+                SystemCallArchitectures = "native";
+                CapabilityBoundingSet = "";
+              };
+            };
 
             systemd.tmpfiles.rules = [
               "d ${builtins.dirOf cfg.listerCredentialsFile} 0750 garage ${cfg.listerUser} -"
@@ -602,7 +650,7 @@
                 UPLOAD_ORIGIN = "https://files.${baseDomain}";
                 UPLOAD_PAGE_DIR = "${./upload-page}";
                 AWS_EC2_METADATA_DISABLED = "true";
-              };
+              } // userBucketsEnv;
               serviceConfig = {
                 ExecStart = "${listerPython}/bin/python3 ${listerSrc}/upload.py";
                 StateDirectory = "gluck-files-acl";
@@ -648,8 +696,9 @@
                 LISTER_ADMIN_GROUP = cfg.adminGroup;
                 LISTER_MEDIA = if cfg.media.enable then "1" else "0";
                 LISTER_CLIENT_PREFIXES_FILE = "${pkgs.writeText "gluck-files-client-prefixes.json" (builtins.toJSON cfg.clientPrefixes)}";
+                LISTER_SHARED_BUCKET = cfg.bucket;
                 AWS_EC2_METADATA_DISABLED = "true";
-              } // lib.optionalAttrs (cfg.subtitleManifestFile != null) {
+              } // userBucketsEnv // lib.optionalAttrs (cfg.subtitleManifestFile != null) {
                 LISTER_SUBTITLE_MANIFEST = cfg.subtitleManifestFile;
               };
               serviceConfig = {
@@ -717,6 +766,8 @@
                 garage = { service = "garage.service"; owner = "garage"; };
               } // lib.optionalAttrs cfg.media.enable {
                 media = { service = cfg.media.service; owner = cfg.media.user; };
+              } // lib.optionalAttrs cfg.userBuckets.enable {
+                s3 = { service = "gluck-files-s3-relay.service"; owner = s3RelayUser; };
               };
               extraConfig = browserPathConfig;
               beforeAuthConfig = import ./lib/upload-policy.nix + import ./lib/media-document-policy.nix
