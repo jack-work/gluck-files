@@ -598,6 +598,12 @@
               group = s3RelayUser;
             };
             users.groups.${s3RelayUser} = lib.mkIf cfg.userBuckets.enable { };
+            systemd.tmpfiles.settings.gluck-files-s3-relay = lib.mkIf cfg.userBuckets.enable {
+              ${s3Relay.directory}.d = { mode = "0750"; user = s3RelayUser; group = "kweb-front"; };
+            };
+            systemd.services.kweb-gluck-files-s3-check = lib.mkIf cfg.userBuckets.enable {
+              serviceConfig.ExecStartPost = "${pkgs.curl}/bin/curl -sS -o /dev/null --max-time 10 --unix-socket ${lib.removePrefix "unix/" s3Relay.dial} http://${"127.0.0.1:${toString cfg.ports.s3}"}/";
+            };
 
             systemd.services.gluck-files-s3-relay = lib.mkIf cfg.userBuckets.enable {
               description = "Caddy's unix-socket way to Garage's S3 API, for presigned downloads from user buckets";
@@ -615,7 +621,7 @@
                 PrivateTmp = true;
                 PrivateDevices = true;
                 ProtectSystem = "strict";
-                ReadWritePaths = [ s3Relay.directory ];
+                ReadWritePaths = [ "-${s3Relay.directory}" ];
                 ProtectHome = true;
                 ProtectKernelTunables = true;
                 ProtectKernelModules = true;
