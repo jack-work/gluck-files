@@ -61,19 +61,19 @@ async function sendPart(file, up, n) {
 
 async function upload(item) {
   const { file, ui } = item;
-  ui.state("Starting");
+  ui.state("Starting", "busy");
   const { up, done } = await begin(file);
   const total = Math.max(1, Math.ceil(file.size / partBytes));
   const todo = [];
   for (let n = 1; n <= total; n++) if (!done.has(n)) todo.push(n);
   let finished = total - todo.length;
-  const show = () => { ui.bar(finished / total); ui.state("Uploading " + mb(Math.min(file.size, finished * partBytes)) + " of " + mb(file.size)); };
+  const show = () => { ui.bar(finished / total); ui.state("Uploading " + mb(Math.min(file.size, finished * partBytes)) + " of " + mb(file.size), "busy"); };
   show();
   const workers = Array.from({ length: PARALLEL }, async () => {
     while (todo.length) { const n = todo.shift(); await sendPart(file, up, n); finished++; show(); }
   });
   await Promise.all(workers);
-  ui.state("Finishing");
+  ui.state("Finishing", "busy");
   await api("POST", "/_upload/api/complete", { key: up.key, id: up.id, size: file.size });
   localStorage.removeItem(memoKey(file));
   ui.bar(1);
@@ -117,12 +117,14 @@ window.addEventListener("beforeunload", (e) => { if (queue.some((i) => !i.done) 
   try {
     const me = await api("GET", "/_upload/api/me");
     partBytes = me.partBytes || partBytes;
-    $("who").textContent = me.writable ? "Signed in as " + me.user + ". Files go to your folder." : "Signed in as " + me.user + ", but this account can't upload yet. Ask Jack to turn it on.";
+    $("who").textContent = me.user;
+    $("lede").textContent = me.writable ? "Files go to your folder." : "This account can't upload yet. Ask whoever runs this server to turn it on.";
     $("folder").href = "/" + encodeURI(me.folder) + "uploads/";
     $("folder").hidden = false;
     $("pickLabel").hidden = !me.writable;
     $("hint").hidden = !me.writable;
   } catch (e) {
-    $("who").textContent = e.status === 401 ? "Please sign in first, then open this page again." : "Can't reach the server: " + e.message;
+    $("who").textContent = "signed out";
+    $("lede").textContent = e.status === 401 ? "Sign in first, then open this page again." : "Can't reach the server: " + e.message;
   }
 })();
