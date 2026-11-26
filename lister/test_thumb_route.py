@@ -92,6 +92,7 @@ class Served(Base):
         self.assertEqual(r.data, THUMB)
         self.assertEqual(r.headers["Content-Type"], "image/jpeg")
         self.assertEqual(r.headers["Cache-Control"], "private, max-age=31536000, immutable")
+        self.assertEqual(r.headers["X-Thumb-Cache"], r.headers["Cache-Control"])
         self.assertEqual(r.headers["X-Content-Type-Options"], "nosniff")
         self.assertNotIn("X-Thumb", r.headers)
         self.assertTrue(r.headers["ETag"])
@@ -128,6 +129,7 @@ class Pending(Base):
         self.assertEqual(r.status_code, 404)
         self.assertEqual(r.headers["X-Thumb"], "pending")
         self.assertEqual(r.headers["Cache-Control"], "no-store")
+        self.assertEqual(r.headers["X-Thumb-Cache"], "no-store")
 
     def test_a_marker_a_non_jpeg_and_an_oversize_object_are_pending_not_served(self):
         for name in ("zero", "notjpeg", "huge"):

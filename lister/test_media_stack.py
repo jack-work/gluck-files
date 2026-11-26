@@ -667,6 +667,7 @@ api_bind_addr = "127.0.0.1:28393"
         self.assertEqual(h['cache-control'], 'private, max-age=31536000, immutable')
         self.assertEqual(h['content-type'], 'image/jpeg')
         self.assertEqual(h['x-content-type-options'], 'nosniff')
+        self.assertNotIn('x-thumb-cache', h)
         status, h, body = self.get('/_thumb/users/alice/camera/later.jpg?v=1')
         self.assertEqual(status, 404)
         self.assertEqual(h['x-thumb'], 'pending')
@@ -677,8 +678,12 @@ api_bind_addr = "127.0.0.1:28393"
             self.assertNotIn('x-thumb', h)
             self.assertIn('no-store', h['cache-control'])
         self.assertEqual(refused[0][2], refused[1][2])
-        self.assertEqual(self.get('/_thumb/users/alice/camera/a.jpg', user=None)[0], 401)
-        self.assertEqual(self.get('/_thumb/users/alice/camera/a.jpg', user=None, headers={'Authorization': 'Bearer tv-alice'})[0], 403)
+        status, h, body = self.get('/_thumb/users/alice/camera/a.jpg', user=None)
+        self.assertEqual(status, 401)
+        self.assertEqual(h['cache-control'], 'private, no-store')
+        status, h, body = self.get('/_thumb/users/alice/camera/a.jpg', user=None, headers={'Authorization': 'Bearer tv-alice'})
+        self.assertEqual(status, 403)
+        self.assertEqual(h['cache-control'], 'private, no-store')
 
     def test_98_first_auth_transport_error_has_policy(self):
         self.auth.shutdown()

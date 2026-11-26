@@ -660,7 +660,7 @@ def thumb_subject(rel):
 
 
 def no_thumb(pending=False):
-    headers = {"Cache-Control": "no-store"}
+    headers = {"Cache-Control": "no-store", "X-Thumb-Cache": "no-store"}
     if pending:
         headers["X-Thumb"] = "pending"
     return Response("not found\n", status=404, mimetype="text/plain", headers=headers)
@@ -695,6 +695,7 @@ def thumb(rel):
         return no_thumb(pending=True)
     response = Response(data, mimetype="image/jpeg", headers={
         "Cache-Control": THUMB_CACHE,
+        "X-Thumb-Cache": THUMB_CACHE,
         "Content-Disposition": "inline",
         "X-Content-Type-Options": "nosniff",
     })

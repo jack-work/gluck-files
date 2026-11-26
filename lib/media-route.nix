@@ -226,13 +226,7 @@ in
   }
   @files_thumb path /_thumb/*
   handle @files_thumb {
-    reverse_proxy ${listerAddress} {
-      @thumb_served status 200 304
-      handle_response @thumb_served {
-        header >Cache-Control "private, max-age=31536000, immutable"
-        copy_response
-      }
-    }
+    reverse_proxy ${listerAddress}
   }
   @files_internal path /_files/*
   respond @files_internal 404

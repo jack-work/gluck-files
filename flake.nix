@@ -784,7 +784,7 @@
                 s3 = { service = "gluck-files-s3-relay.service"; owner = s3RelayUser; };
               };
               extraConfig = browserPathConfig;
-              beforeAuthConfig = import ./lib/upload-policy.nix + import ./lib/media-document-policy.nix
+              beforeAuthConfig = import ./lib/upload-policy.nix + import ./lib/media-document-policy.nix + import ./lib/thumb-policy.nix
                 + lib.optionalString cfg.media.enable (import ./lib/media-player-policy.nix { host = "files.${baseDomain}"; });
               responseHeaders = mediaHeaders;
             };
@@ -917,6 +917,7 @@
                 :${toString port} {
                   route {
                     ${import ./lib/media-document-policy.nix}
+                    ${import ./lib/thumb-policy.nix}
                     header {
                       ${headers}
                     }
