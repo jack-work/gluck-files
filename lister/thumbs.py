@@ -1,9 +1,11 @@
 import ctypes
+import importlib.util
 import logging
 import os
 import platform
 import queue
 import resource
+import shutil
 import subprocess
 import sys
 import threading
@@ -64,6 +66,12 @@ def wanted(inner):
 
 def bare(etag):
     return (etag or "").strip('"')
+
+
+def can(kind):
+    if kind is None or importlib.util.find_spec("PIL") is None:
+        return False
+    return kind == "image" or shutil.which(FFMPEG) is not None
 
 
 def lower_priority():
@@ -155,6 +163,8 @@ def ensure(client, bucket, inner, source=None, force=False, retry_failed=False, 
     kind = kind_of(inner)
     if kind is None or hidden(inner):
         return "unsupported"
+    if not can(kind):
+        return "unavailable"
     if source is None:
         head = head_of(client, bucket, inner)
         if head is None:
@@ -198,7 +208,7 @@ class Worker:
         self.lock = threading.Lock()
 
     def submit(self, key):
-        if not wanted(key):
+        if not wanted(key) or not can(kind_of(key)):
             return False
         try:
             self.jobs.put_nowait(key)
