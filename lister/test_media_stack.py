@@ -656,6 +656,30 @@ api_bind_addr = "127.0.0.1:28393"
             self.assertEqual(self.scope_seen(path, headers=forged), (200, None), path)
         self.assertEqual(self.scope_seen('/_media/api/item/books/a.epub', user=None, headers={**mdev, **forged}), (200, None))
 
+    def test_27_a_thumb_is_cached_by_the_browser_only_when_it_was_served(self):
+        jpeg = b'\xff\xd8\xff\xe0THUMBNAIL\xff\xd9'
+        self.s3.put_object(Bucket='files', Key='.thumbs/users/alice/camera/a.jpg.jpg', Body=jpeg, ContentType='image/jpeg')
+        self.s3.put_object(Bucket='files', Key='.thumbs/users/bob/camera/b.jpg.jpg', Body=jpeg, ContentType='image/jpeg')
+        self.L.ACL.grant('user:alice', 'users/alice/', 'read', 'fixture')
+        self.L.ACL.grant('user:bob', 'users/bob/', 'read', 'fixture')
+        status, h, body = self.get('/_thumb/users/alice/camera/a.jpg?v=1')
+        self.assertEqual((status, body), (200, jpeg))
+        self.assertEqual(h['cache-control'], 'private, max-age=31536000, immutable')
+        self.assertEqual(h['content-type'], 'image/jpeg')
+        self.assertEqual(h['x-content-type-options'], 'nosniff')
+        status, h, body = self.get('/_thumb/users/alice/camera/later.jpg?v=1')
+        self.assertEqual(status, 404)
+        self.assertEqual(h['x-thumb'], 'pending')
+        self.assertIn('no-store', h['cache-control'])
+        refused = [self.get('/_thumb/users/bob/camera/b.jpg'), self.get('/_thumb/users/nobody/camera/b.jpg')]
+        for status, h, body in refused:
+            self.assertEqual(status, 404)
+            self.assertNotIn('x-thumb', h)
+            self.assertIn('no-store', h['cache-control'])
+        self.assertEqual(refused[0][2], refused[1][2])
+        self.assertEqual(self.get('/_thumb/users/alice/camera/a.jpg', user=None)[0], 401)
+        self.assertEqual(self.get('/_thumb/users/alice/camera/a.jpg', user=None, headers={'Authorization': 'Bearer tv-alice'})[0], 403)
+
     def test_98_first_auth_transport_error_has_policy(self):
         self.auth.shutdown()
         self.auth.server_close()

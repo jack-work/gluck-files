@@ -224,6 +224,16 @@ in
   handle @files_viewer {
     reverse_proxy ${listerAddress}
   }
+  @files_thumb path /_thumb/*
+  handle @files_thumb {
+    reverse_proxy ${listerAddress} {
+      @thumb_served status 200 304
+      handle_response @thumb_served {
+        header >Cache-Control "private, max-age=31536000, immutable"
+        copy_response
+      }
+    }
+  }
   @files_internal path /_files/*
   respond @files_internal 404
   ${if media == null then "" else mediaRoutes}
