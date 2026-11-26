@@ -7,13 +7,14 @@ import zipfile
 from collections import deque
 from datetime import datetime, timezone
 
+from botocore.exceptions import ClientError
 from flask import Response, request
 
 from acl import BadPath, normalise
 from place import Unplaced
 
 BATCH_FILES = 50
-BATCH_BYTES = 200 * 1024 * 1024
+BATCH_BYTES = 500 * 1024 * 1024
 MAX_LISTED = 20000
 CHUNK = 1024 * 1024
 
@@ -26,19 +27,72 @@ TYPES = {
     ".3gp": "video/3gpp", ".pdf": "application/pdf",
 }
 SAVABLE = tuple(TYPES)
+VIDEOS = (".mp4", ".mov", ".m4v", ".3gp")
 UNDATED = "undated"
+DEFAULT_ROOT = "photos/keep/"
+SETTINGS = ".save.json"
+DATE_COLUMNS = ("date", "taken", "taken_at", "date_taken", "datetime", "exif_date", "created")
+MANIFEST = "manifest.tsv"
+_manifests = {}
 
 
-def month_of(rel, modified=None):
+def is_video(rel):
+    return rel.lower().endswith(VIDEOS)
+
+
+def month_from_value(value):
+    value = (value or "").strip()
+    m = re.match(r"((?:19|20)\d\d)[-/]?(0[1-9]|1[0-2])", value)
+    if m:
+        return f"{m.group(1)}-{m.group(2)}"
+    if re.fullmatch(r"\d{9,10}(\.\d+)?", value):
+        return datetime.fromtimestamp(float(value), timezone.utc).strftime("%Y-%m")
+    return None
+
+
+def manifest_months(text):
+    rows = text.splitlines()
+    if not rows:
+        return {}
+    header = [h.strip().lower() for h in rows[0].split("\t")]
+    col = next((header.index(c) for c in DATE_COLUMNS if c in header), None)
+    path = header.index("path") if "path" in header else None
+    if col is None or path is None:
+        return {}
+    out = {}
+    for row in rows[1:]:
+        cells = row.split("\t")
+        if len(cells) <= max(col, path):
+            continue
+        month = month_from_value(cells[col])
+        if not month:
+            continue
+        parts = cells[path].strip("/").split("/")
+        for i in range(len(parts)):
+            out.setdefault("/".join(parts[i:]), month)
+    return out
+
+
+def month_of(rel, modified=None, manifest=None):
+    if manifest and rel in manifest:
+        return manifest[rel]
     base = rel.rsplit("/", 1)[-1]
     for rx in (DATE, DASHED):
         m = rx.search(base)
         if m:
             return f"{m.group(1)}-{m.group(2)}"
+    if modified is not None:
+        return modified.strftime("%Y-%m")
     return UNDATED
 
 
 def batches_of(files):
+    photos = [f for f in files if not is_video(f["rel"])]
+    videos = [f for f in files if is_video(f["rel"])]
+    return cut(photos) + cut(videos)
+
+
+def cut(files):
     out, cur, size = [], [], 0
     for f in files:
         if cur and (len(cur) >= BATCH_FILES or size + f["size"] > BATCH_BYTES):
@@ -116,6 +170,56 @@ def register(app, *, place, caller, acl, page_dir, refuse, ok, log):
             root += "/"
         return root
 
+    def read_object(user, rel, limit):
+        try:
+            client, bucket, inner = place(f"users/{user}/{rel}")
+            r = client.get_object(Bucket=bucket, Key=inner)
+            etag = r.get("ETag")
+            body = r["Body"]
+            data = b"".join(body.iter_chunks(CHUNK))
+            body.close()
+        except (ClientError, Unplaced, KeyError):
+            return None, None
+        return (data[:limit] if data else None), etag
+
+    def settings_root(user):
+        data, _ = read_object(user, SETTINGS, 4096)
+        if not data:
+            return None
+        try:
+            root = json.loads(data.decode()).get("root")
+        except (ValueError, AttributeError):
+            return None
+        return clean_root(root, user) if isinstance(root, str) else None
+
+    def has_objects(user, root):
+        try:
+            client, bucket, inner = place(f"users/{user}/{root}")
+            return bool(client.list_objects_v2(Bucket=bucket, Prefix=inner, MaxKeys=1).get("Contents"))
+        except (ClientError, Unplaced):
+            return False
+
+    def resolve_root(user, requested):
+        if requested is not None:
+            return clean_root(requested, user)
+        configured = settings_root(user)
+        if configured is not None:
+            return configured
+        return DEFAULT_ROOT if has_objects(user, DEFAULT_ROOT) else ""
+
+    def months_for(user, root):
+        parent = root.rstrip("/").rpartition("/")[0]
+        key = (parent + "/" if parent else "") + MANIFEST
+        data, etag = read_object(user, key, 8 * 1024 * 1024)
+        if not data:
+            return {}
+        held = _manifests.get((user, key))
+        if held and held[0] == etag and etag:
+            return held[1]
+        parsed = manifest_months(data.decode("utf-8", "replace"))
+        _manifests[(user, key)] = (etag, parsed)
+        return parsed
+
     def listed(user, groups, root):
         home = f"users/{user}/"
         top = home + root
@@ -146,10 +250,10 @@ def register(app, *, place, caller, acl, page_dir, refuse, ok, log):
         files.sort(key=lambda f: f["rel"].lower())
         return files
 
-    def by_month(files):
+    def by_month(files, manifest=None):
         months = {}
         for f in files:
-            months.setdefault(month_of(f["rel"]), []).append(f)
+            months.setdefault(month_of(f["rel"], f["modified"], manifest), []).append(f)
         return months
 
     @app.get("/_save/")
@@ -167,21 +271,21 @@ def register(app, *, place, caller, acl, page_dir, refuse, ok, log):
     @app.get("/_save/api/list")
     def save_list():
         user, groups = caller()
-        root = clean_root(request.args.get("root", "photos/"), user)
+        root = resolve_root(user, request.args.get("root"))
         if root is None:
             return refuse(400, "bad folder")
         files = listed(user, groups, root)
         if files is None:
             return refuse(404, "nothing to save here")
         out = []
-        grouped = by_month(files)
+        grouped = by_month(files, months_for(user, root))
         order = sorted((m for m in grouped if m != UNDATED), reverse=True) + ([UNDATED] if UNDATED in grouped else [])
         for month in order:
             group = grouped[month]
             bs = batches_of(group)
             out.append({
                 "month": month, "files": len(group), "bytes": sum(f["size"] for f in group),
-                "batches": [{"n": i + 1, "files": [{"rel": f["rel"], "size": f["size"]} for f in b],
+                "batches": [{"n": i + 1, "kind": "videos" if is_video(b[0]["rel"]) else "photos", "files": [{"rel": f["rel"], "size": f["size"]} for f in b],
                              "bytes": sum(f["size"] for f in b)} for i, b in enumerate(bs)],
             })
         return ok({"user": user, "root": root, "base": f"/users/{user}/{root}",
@@ -191,7 +295,7 @@ def register(app, *, place, caller, acl, page_dir, refuse, ok, log):
     @app.get("/_save/api/zip")
     def save_zip():
         user, groups = caller()
-        root = clean_root(request.args.get("root", "photos/"), user)
+        root = resolve_root(user, request.args.get("root"))
         month = request.args.get("month", "")
         try:
             n = int(request.args.get("batch", ""))
@@ -202,7 +306,7 @@ def register(app, *, place, caller, acl, page_dir, refuse, ok, log):
         files = listed(user, groups, root)
         if files is None:
             return refuse(404, "nothing to save here")
-        bs = batches_of(by_month(files).get(month, []))
+        bs = batches_of(by_month(files, months_for(user, root)).get(month, []))
         if n > len(bs):
             return refuse(404, "no such batch")
         batch = bs[n - 1]

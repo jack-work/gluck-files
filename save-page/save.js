@@ -50,7 +50,7 @@ function render() {
       const p = document.createElement("div");
       p.className = "part" + (isDone(m.month, b) ? " done" : "");
       p.innerHTML = '<div><div class="pname"></div><div class="pmeta"></div></div>';
-      p.querySelector(".pname").textContent = "Part " + b.n + " of " + m.batches.length;
+      p.querySelector(".pname").textContent = "Part " + b.n + " of " + m.batches.length + (b.kind === "videos" ? " · videos" : "");
       p.querySelector(".pmeta").textContent = plural(b.files.length, "file") + " · " + mb(b.bytes) + (isDone(m.month, b) ? " · sent to your phone" : "");
       let act;
       if (data.shareable) {
@@ -202,8 +202,8 @@ $("jobCancel").addEventListener("click", () => {
 
 (async () => {
   try {
-    const root = new URLSearchParams(location.search).get("root") || "photos/";
-    const r = await fetch("/_save/api/list?root=" + encodeURIComponent(root), { credentials: "same-origin" });
+    const asked = new URLSearchParams(location.search).get("root");
+    const r = await fetch("/_save/api/list" + (asked === null ? "" : "?root=" + encodeURIComponent(asked)), { credentials: "same-origin" });
     const j = await r.json().catch(() => ({}));
     if (r.status === 401) { $("who").textContent = "signed out"; $("lede").textContent = "Sign in first, then open this page again."; return; }
     if (!r.ok) { $("lede").textContent = r.status === 404 ? "There is no photos folder for your account yet." : "Can't list your photos: " + (j.error || r.status); return; }

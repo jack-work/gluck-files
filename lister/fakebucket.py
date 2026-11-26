@@ -3,6 +3,8 @@ import io
 import random
 from datetime import datetime, timezone
 
+from botocore.exceptions import ClientError
+
 
 class Body:
     def __init__(self, data):
@@ -39,7 +41,10 @@ class FakeBucket:
 
     def get_object(self, Bucket, Key, **_):
         self.gets += 1
-        return {"Body": Body(self.objects[Key])}
+        if Key not in self.objects:
+            raise ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
+        data = self.objects[Key]
+        return {"Body": Body(data), "ETag": hashlib.md5(data).hexdigest()}
 
 
 def invented(seed=5):

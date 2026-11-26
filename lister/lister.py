@@ -351,8 +351,7 @@ def render(bucket, prefix, user, groups):
         bucket=bucket,
         truncated=truncated,
         shown=shown,
-        save_href=("/_save/?root=" + quote(prefix[len("users/" + user + "/"):], safe="/")
-                   if prefix.startswith("users/" + user + "/") else None),
+        save_href="/_save/" if prefix.startswith("users/" + user + "/") else None,
     )
 
 

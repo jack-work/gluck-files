@@ -40,7 +40,7 @@ async function open({ share, user = "pilar" }) {
   const problems = [];
   page.on("console", (m) => { if (["error", "warning"].includes(m.type())) problems.push(m.text()); });
   page.on("pageerror", (e) => problems.push(String(e)));
-  await page.goto("/_save/");
+  await page.goto("/_save/?root=photos/");
   return { ctx, page, problems };
 }
 
@@ -49,7 +49,7 @@ await test("with share: pick a month, fetch the batch, one tap hands the exact b
   await page.waitForSelector("details.month");
   assert.match(await page.textContent("#lede"), /photo and video files/);
   const months = await page.$$eval("details.month .mname", (e) => e.map((x) => x.textContent));
-  assert.deepEqual(months, ["June 2025", "June 2024", "May 2024", "January 2023", "No date in the name"]);
+  assert.deepEqual(months, ["November 2026", "June 2025", "June 2024", "May 2024", "January 2023"]);
   await page.click('details.month[data-month="2024-06"] > summary');
   const parts = await page.$$eval('details.month[data-month="2024-06"] .part .pmeta', (e) => e.map((x) => x.textContent));
   assert.ok(parts.length >= 2, "the 6 MB cap splits June into several parts: " + parts);
@@ -130,7 +130,7 @@ print(json.dumps({n: hashlib.sha256(z.read(n)).hexdigest() for n in z.namelist()
 await test("signed out: the page says to sign in and lists nothing", async () => {
   const ctx = await browser.newContext({ ...device, baseURL: base });
   const page = await ctx.newPage();
-  const r = await page.goto("/_save/");
+  const r = await page.goto("/_save/?root=photos/");
   assert.equal(r.status(), 401);
   await ctx.close();
 });
