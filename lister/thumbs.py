@@ -159,7 +159,7 @@ def store(client, bucket, inner, body, etag, size, failed=""):
     client.put_object(Bucket=bucket, Key=thumb_key(inner), Body=body, ContentType="image/jpeg", Metadata=meta)
 
 
-def ensure(client, bucket, inner, source=None, force=False, retry_failed=False, ffmpeg=None):
+def ensure(client, bucket, inner, source=None, force=False, retry_failed=False, ffmpeg=None, dry_run=False):
     kind = kind_of(inner)
     if kind is None or hidden(inner):
         return "unsupported"
@@ -180,6 +180,8 @@ def ensure(client, bucket, inner, source=None, force=False, retry_failed=False, 
                 return "current"
             if not retry_failed:
                 return "marked"
+    if dry_run:
+        return "stale"
     try:
         if kind == "video":
             url = client.generate_presigned_url("get_object", Params={"Bucket": bucket, "Key": inner}, ExpiresIn=PRESIGN_SECONDS)
