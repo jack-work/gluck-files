@@ -224,6 +224,10 @@ in
   handle @files_viewer {
     reverse_proxy ${listerAddress}
   }
+  @files_thumb path /_thumb/*
+  handle @files_thumb {
+    reverse_proxy ${listerAddress}
+  }
   @files_internal path /_files/*
   respond @files_internal 404
   ${if media == null then "" else mediaRoutes}

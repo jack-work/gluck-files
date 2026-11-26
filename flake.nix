@@ -783,7 +783,7 @@
                 s3 = { service = "gluck-files-s3-relay.service"; owner = s3RelayUser; };
               };
               extraConfig = browserPathConfig;
-              beforeAuthConfig = import ./lib/upload-policy.nix + import ./lib/media-document-policy.nix
+              beforeAuthConfig = import ./lib/upload-policy.nix + import ./lib/media-document-policy.nix + import ./lib/thumb-policy.nix
                 + lib.optionalString cfg.media.enable (import ./lib/media-player-policy.nix { host = "files.${baseDomain}"; });
               responseHeaders = mediaHeaders;
             };
@@ -891,6 +891,7 @@
           bucket-for = suite "bucket-for" "test_lister.py";
           thumbs = suite "thumbs" "test_thumbs.py";
           thumb-hook = suite "thumb-hook" "test_thumb_hook.py";
+          thumb-route = suite "thumb-route" "test_thumb_route.py";
           scheme = (suite "scheme" "test_scheme.py").overrideAttrs { LISTER_TEMPLATE_BUILT = listerTemplateFor pkgs; };
 
           socket = pkgs.runCommand "gluck-files-socket" { } ''
@@ -914,6 +915,7 @@
                 :${toString port} {
                   route {
                     ${import ./lib/media-document-policy.nix}
+                    ${import ./lib/thumb-policy.nix}
                     header {
                       ${headers}
                     }

@@ -23,6 +23,7 @@ import base64
 import json
 import logging
 import os
+import re
 import socket
 import sys
 import threading
@@ -40,8 +41,9 @@ from markupsafe import escape
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from acl import Acl, BadPath, canonical_object_uri, media_request, normalise
 from caption_gate import CaptionGate, ManifestUnavailable
-from place import Places, Unplaced
+from place import Places, Unplaced, home_owner
 from save import UNDATED, day_of, kind_of
+from thumbs import thumb_key
 from urllib.parse import urlencode
 
 BUCKETS = frozenset(
@@ -516,6 +518,9 @@ def healthz():
     return Response("ok\n", mimetype="text/plain")
 
 
+THUMB_QUEUE_FACTOR = 8
+
+
 class Admission:
     def __init__(self, limit):
         self._limit = limit
@@ -531,8 +536,9 @@ class Admission:
         with dispatcher.lock:
             return len(dispatcher.queue)
 
-    def is_overloaded(self):
-        return self.waiting() > self._limit
+    def is_overloaded(self, path=""):
+        limit = self._limit * THUMB_QUEUE_FACTOR if path.startswith("/_thumb/") else self._limit
+        return self.waiting() > limit
 
 
 ADMISSION = Admission(MAX_QUEUE)
@@ -540,7 +546,7 @@ ADMISSION = Admission(MAX_QUEUE)
 
 @app.before_request
 def refuse_when_overloaded():
-    if request.path == "/healthz" or not ADMISSION.is_overloaded():
+    if request.path == "/healthz" or not ADMISSION.is_overloaded(request.path):
         return None
     log.warning("shed %s, %d waiting", request.path, ADMISSION.waiting())
     return Response(
@@ -630,6 +636,73 @@ def media_viewer():
                                   folder="/" + here, prev_href=prev_href, next_href=next_href,
                                   heic=key.lower().endswith((".heic", ".heif")),
                                   size=human(meta.get("ContentLength", 0)), when=when(meta.get("LastModified"))), {"Vary": "Cookie"}
+
+
+THUMB_MAX_BYTES = 2 * 1024 * 1024
+JPEG_MAGIC = b"\xff\xd8\xff"
+THUMB_CACHE = "private, max-age=31536000, immutable"
+ABSENT_CODES = ("404", "NoSuchKey", "NotFound", "NoSuchBucket")
+
+
+def thumb_subject(rel):
+    if not isinstance(rel, str) or len(rel) > 1024 or re.search(r"[\x00-\x1f\x7f\\]", rel):
+        return None
+    try:
+        key = normalise(rel)
+    except BadPath:
+        return None
+    owner = home_owner(key)
+    if key != rel or key.endswith("/") or owner is None or len(key) <= len("users/" + owner + "/"):
+        return None
+    if any(part.startswith(".") for part in key.split("/")):
+        return None
+    return key
+
+
+def no_thumb(pending=False):
+    headers = {"Cache-Control": "no-store", "X-Thumb-Cache": "no-store"}
+    if pending:
+        headers["X-Thumb"] = "pending"
+    return Response("not found\n", status=404, mimetype="text/plain", headers=headers)
+
+
+@app.get("/_thumb/<path:rel>")
+def thumb(rel):
+    user = caller()
+    if not user:
+        abort(401)
+    bucket = bucket_for(request.host)
+    key = thumb_subject(rel)
+    if bucket is None or key is None or not in_scope(key, client_scope()) \
+            or not ACL.allows(user, caller_groups(), key, "read"):
+        decided(False, "thumb", bucket, key or rel, user)
+        return no_thumb()
+    try:
+        client, where, inner = PLACES.at(bucket, key)
+        got = client.get_object(Bucket=where, Key=thumb_key(inner))
+    except Unplaced:
+        return no_thumb(pending=True)
+    except ClientError as e:
+        if e.response.get("Error", {}).get("Code") in ABSENT_CODES:
+            return no_thumb(pending=True)
+        raise
+    body = got["Body"]
+    try:
+        data = body.read(THUMB_MAX_BYTES + 1)
+    finally:
+        body.close()
+    if not data or len(data) > THUMB_MAX_BYTES or not data.startswith(JPEG_MAGIC):
+        return no_thumb(pending=True)
+    response = Response(data, mimetype="image/jpeg", headers={
+        "Cache-Control": THUMB_CACHE,
+        "X-Thumb-Cache": THUMB_CACHE,
+        "Content-Disposition": "inline",
+        "X-Content-Type-Options": "nosniff",
+    })
+    if got.get("ETag"):
+        response.set_etag(got["ETag"].strip('"'))
+        response.make_conditional(request)
+    return response
 
 
 @app.get("/_files/authz")
