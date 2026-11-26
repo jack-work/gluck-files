@@ -16,6 +16,7 @@ from flask import Flask, Response, request
 from acl import Acl, BadPath, normalise
 from place import Places, Unplaced
 import save
+import thumbs
 
 BUCKET = os.environ.get("UPLOAD_BUCKET", "files")
 ENDPOINT = os.environ.get("UPLOAD_ENDPOINT", "http://127.0.0.1:3900")
@@ -57,6 +58,18 @@ PLACES = Places(s3, BUCKET, ENDPOINT, REGION, S3_CONFIG,
 
 def place(key, ensure=False):
     return PLACES.at(BUCKET, key, ensure)
+
+
+THUMBS = thumbs.Worker(lambda key: place(key)) if os.environ.get("UPLOAD_THUMBS", "1") != "0" else None
+
+
+def thumb_later(key):
+    if THUMBS is None:
+        return
+    try:
+        THUMBS.submit(key)
+    except Exception:
+        log.exception("thumb for %s not queued", key)
 
 
 def refuse(status, why):
@@ -260,6 +273,7 @@ def complete():
     client.complete_multipart_upload(Bucket=bucket, Key=inner, UploadId=upload_id, MultipartUpload={
         "Parts": [{"PartNumber": p["PartNumber"], "ETag": p["ETag"]} for p in got]})
     log.info("completed %s for %s, %d bytes", key, user, size)
+    thumb_later(key)
     return ok({"key": key, "size": size})
 
 

@@ -661,6 +661,7 @@
                 UPLOAD_ORIGIN = "https://files.${baseDomain}";
                 UPLOAD_PAGE_DIR = "${./upload-page}";
                 SAVE_PAGE_DIR = "${./save-page}";
+                THUMBS_FFMPEG = "${pkgs.ffmpeg-headless}/bin/ffmpeg";
                 AWS_EC2_METADATA_DISABLED = "true";
               } // userBucketsEnv;
               serviceConfig = {
@@ -889,6 +890,7 @@
           viewer = suite "viewer" "test_viewer.py";
           bucket-for = suite "bucket-for" "test_lister.py";
           thumbs = suite "thumbs" "test_thumbs.py";
+          thumb-hook = suite "thumb-hook" "test_thumb_hook.py";
           scheme = (suite "scheme" "test_scheme.py").overrideAttrs { LISTER_TEMPLATE_BUILT = listerTemplateFor pkgs; };
 
           socket = pkgs.runCommand "gluck-files-socket" { } ''
