@@ -121,7 +121,10 @@ def register(app, *, place, caller, acl, page_dir, refuse, ok, log):
         top = home + root
         if not acl.allows(user, groups, top, "list") or not acl.allows(user, groups, top, "read"):
             return None
-        client, bucket, inner = place(top)
+        try:
+            client, bucket, inner = place(top)
+        except Unplaced:
+            return None
         files, token = [], None
         while True:
             kw = {"Bucket": bucket, "Prefix": inner, "MaxKeys": 1000}

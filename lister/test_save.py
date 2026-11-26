@@ -103,6 +103,24 @@ class Api(unittest.TestCase):
         self.assertEqual(self.get("/_save/api/list", user=None).status_code, 401)
         self.assertEqual(self.get("/_save/", user=None).status_code, 401)
 
+    def test_a_granted_person_with_no_bucket_yet_gets_404_like_no_access(self):
+        from place import Unplaced
+        upload.ACL.grant("user:newbie", "users/newbie/", "read", "test")
+        upload.ACL.grant("user:newbie", "users/newbie/", "list", "test")
+        real = upload.PLACES.at
+
+        def at(bucket, key, ensure=False):
+            if key.startswith("users/newbie/"):
+                raise Unplaced("newbie has no bucket yet")
+            return real(bucket, key, ensure)
+
+        upload.PLACES.at = at
+        try:
+            self.assertEqual(self.get("/_save/api/list?root=photos/", user="newbie").status_code, 404)
+            self.assertEqual(self.get("/_save/api/zip?root=photos/&month=2024-05&batch=1", user="newbie").status_code, 404)
+        finally:
+            upload.PLACES.at = real
+
     def test_a_climbing_root_is_refused(self):
         self.assertEqual(self.get("/_save/api/list?root=../dad/").status_code, 400)
 
