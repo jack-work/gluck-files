@@ -204,6 +204,13 @@ in
   ${bearerGate}
   ${if uploadAddress == null then "" else ''
     redir /_upload /_upload/ 308
+    redir /_save /_save/ 308
+    handle /_save/* {
+      request_header -X-Files-URI
+      reverse_proxy ${uploadAddress} {
+        header_up -Authorization
+      }
+    }
     handle /_upload/* {
       request_header -X-Files-URI
       reverse_proxy ${uploadAddress} {

@@ -1,0 +1,25 @@
+main { padding-bottom: 220px; }
+.month { margin: 0 0 12px; border: 2px solid var(--z-line); border-left-width: 6px; background: var(--z-ground-2); }
+.month[open] { border-color: var(--z-accent); }
+.month > summary { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: baseline; min-height: 56px; padding: 10px 14px; cursor: pointer; list-style: none; }
+.month > summary::-webkit-details-marker { display: none; }
+.month .mname { font-size: 22px; line-height: 1.2; }
+.month .mmeta { grid-column: 1 / -1; font-family: var(--fontpack-mono); font-size: 19px; letter-spacing: 0.03em; color: var(--z-muted); }
+.month .mdone { font-family: var(--fontpack-mono); font-size: 19px; color: var(--z-ok); }
+.parts { padding: 0 12px 10px; }
+.part { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; padding: 8px 0; border-top: 1px dotted var(--z-line); }
+.part .pname { font-size: 19px; }
+.part .pmeta { font-family: var(--fontpack-mono); font-size: 18px; color: var(--z-muted); }
+.part.done .pmeta { color: var(--z-ok); }
+.part button, .part a.folder { margin: 0; min-height: 48px; padding: 8px 16px 6px; font-size: 21px; }
+.job { position: fixed; z-index: 20; left: 0; right: 0; bottom: 0; padding: 12px 14px calc(12px + env(safe-area-inset-bottom)); background: var(--z-ground); border-top: 3px solid var(--gold); }
+.job[hidden] { display: none; }
+.job-title { font-size: 21px; line-height: 1.25; }
+.job-state { margin-top: 6px; font-family: var(--fontpack-mono); font-size: 20px; letter-spacing: 0.03em; color: var(--z-muted); }
+.job.failed .job-state { color: var(--z-fail); }
+.job.ready .job-state { color: var(--z-ok); }
+.job-actions { display: flex; flex-wrap: wrap; gap: 0 12px; }
+.job-actions button, .job-actions a.folder { margin-top: 12px; min-height: 52px; }
+#jobSave { flex: 1 1 100%; font-size: 26px; }
+button.quiet { background: transparent; color: var(--z-ink); }
+.empty { font-style: italic; color: var(--z-muted); }

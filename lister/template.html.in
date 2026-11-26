@@ -173,6 +173,8 @@
     {% endif %}
   </div>
 
+  {% if save_href %}<p class="tally boil-text"><a href="{{ save_href }}">Save photos to your phone</a></p>{% endif %}
+
   <footer class="boil-text">{{ bucket }} on spain{% if truncated %} &middot; listing truncated at {{ shown }} entries{% endif %}</footer>
 </main>
 </body>

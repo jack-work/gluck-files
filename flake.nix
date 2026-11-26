@@ -15,6 +15,7 @@
         cp ${./lister/aclctl.py} $out/aclctl.py
         cp ${./lister/caption_gate.py} $out/caption_gate.py
         cp ${./lister/upload.py} $out/upload.py
+        cp ${./lister/save.py} $out/save.py
         cp ${./lister/place.py} $out/place.py
       '';
 
@@ -655,6 +656,7 @@
                 UPLOAD_ACL_DB = cfg.aclDatabase;
                 UPLOAD_ORIGIN = "https://files.${baseDomain}";
                 UPLOAD_PAGE_DIR = "${./upload-page}";
+                SAVE_PAGE_DIR = "${./save-page}";
                 AWS_EC2_METADATA_DISABLED = "true";
               } // userBucketsEnv;
               serviceConfig = {

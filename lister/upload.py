@@ -15,6 +15,7 @@ from flask import Flask, Response, request
 
 from acl import Acl, BadPath, normalise
 from place import Places, Unplaced
+import save
 
 BUCKET = os.environ.get("UPLOAD_BUCKET", "files")
 ENDPOINT = os.environ.get("UPLOAD_ENDPOINT", "http://127.0.0.1:3900")
@@ -22,6 +23,7 @@ REGION = os.environ.get("UPLOAD_REGION", "spain")
 ACL_DB = os.environ.get("UPLOAD_ACL_DB", "/var/lib/gluck-files-acl/acl.db")
 ORIGIN = os.environ["UPLOAD_ORIGIN"]
 PAGE_DIR = os.environ["UPLOAD_PAGE_DIR"]
+SAVE_PAGE_DIR = os.environ.get("SAVE_PAGE_DIR", "")
 PART_BYTES = 16 * 1024 * 1024
 MAX_PARTS = 10000
 MAX_UPLOAD_BYTES = 8 * 1024 ** 3
@@ -266,6 +268,10 @@ def abort():
     client, bucket, inner = place(key)
     client.abort_multipart_upload(Bucket=bucket, Key=inner, UploadId=upload_id)
     return ok({"aborted": key})
+
+
+if SAVE_PAGE_DIR:
+    save.register(app, place=place, caller=caller, acl=ACL, page_dir=SAVE_PAGE_DIR, refuse=refuse, ok=ok, log=log)
 
 
 @app.errorhandler(ClientError)
