@@ -136,8 +136,11 @@ class Body:
     def __init__(self, data):
         self.data = data
 
-    def read(self):
-        return self.data
+    def read(self, n=None):
+        return self.data if n is None else self.data[:n]
+
+    def close(self):
+        pass
 
 
 class Bucket:
