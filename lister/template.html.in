@@ -2,180 +2,136 @@
 <html lang="en"{% if scheme %} data-scheme="{{ scheme }}"{% endif %}>
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>{{ title }}</title>
 <!-- zanni:fontpack -->
+<!-- zanni:gesso -->
 <style>
-  :root {
-    color-scheme: light dark;
-    --files-sheet: light-dark(var(--paper), var(--stage-2));
-    --files-muted: light-dark(var(--muted), var(--stage-muted));
-  }
-
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-  body {
-    font-family: var(--fontpack-prose);
-    font-size: 18px;
-    line-height: 1.5;
-    padding: 34px 20px 64px;
-  }
-
-  main { max-width: 1000px; margin: 0 auto; position: relative; }
-
-  .crumbs {
-    font-family: var(--fontpack-mono);
-    font-size: 19px;
-    letter-spacing: 0.06em;
-    margin-bottom: 4px;
-    word-break: break-all;
-  }
-  .crumbs a { color: var(--z-accent); text-decoration: none; }
-  .crumbs a:hover { text-decoration: underline; }
-  .crumbs .sep { color: var(--gold); margin: 0 6px; }
-  .crumbs .here { color: var(--z-ink); }
-
-  h1 {
-    font-family: var(--fontpack-display);
-    font-size: 52px;
-    font-weight: 400;
-    line-height: 1.1;
-    margin-bottom: 10px;
-  }
-
-  .tally {
-    font-family: var(--fontpack-mono);
-    font-size: 16px;
-    color: var(--files-muted);
-    margin-bottom: 22px;
-  }
-
-  .sheet {
-    border: 3px solid var(--gold);
-    background: var(--files-sheet);
-  }
-
-  table { width: 100%; border-collapse: collapse; }
-
-  th {
-    font-family: var(--fontpack-mono);
-    font-size: 15px;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    text-align: left;
-    color: var(--files-muted);
-    padding: 10px 16px;
-    border-bottom: 2px solid rgba(162, 118, 42, 0.5);
-  }
-  th.num { text-align: right; }
-
-  td {
-    padding: 7px 16px;
-    border-bottom: 1px solid rgba(162, 118, 42, 0.22);
-    vertical-align: baseline;
-  }
-  tr:last-child td { border-bottom: 0; }
-  tr:hover td { background: rgba(162, 118, 42, 0.09); }
-
-  .glyph {
-    font-family: var(--fontpack-mono);
-    color: var(--gold);
-    width: 1.6em;
-    padding-right: 0;
-  }
-
-  .name a { color: var(--z-ink); text-decoration: none; word-break: break-all; }
-  .name a:hover { color: var(--z-accent); text-decoration: underline; }
-  .name .dir { color: var(--z-accent); }
-
-  td.size, td.when {
-    font-family: var(--fontpack-mono);
-    font-size: 15px;
-    color: var(--files-muted);
-    white-space: nowrap;
-  }
-  td.size { text-align: right; }
-
-  .empty {
-    font-style: italic;
-    color: var(--files-muted);
-    padding: 26px 16px;
-  }
-
-  footer {
-    margin-top: 20px;
-    font-family: var(--fontpack-mono);
-    font-size: 15px;
-    color: var(--files-muted);
-  }
-  footer a { color: var(--z-accent); }
-
-  @media (max-width: 620px) {
-    body { font-size: 17px; padding: 20px 12px 40px; }
-    h1 { font-size: 36px; }
-    td.when, th.when { display: none; }
-    td, th { padding-left: 10px; padding-right: 10px; }
+  :root { color-scheme: dark; --tile: #0e0708; }
+  :root[data-scheme=light] { color-scheme: light; --tile: #cdb7a3; }
+  *, *::before, *::after { box-sizing: border-box; }
+  body { margin: 0; font-family: var(--fontpack-prose); font-size: 19px; line-height: 1.4; min-height: 100vh; -webkit-text-size-adjust: 100%; }
+  a { color: var(--z-accent); }
+  .ic { display: inline-block; width: calc(var(--w) * var(--px)); height: calc(var(--h) * var(--px)); fill: currentColor; flex: none; vertical-align: middle; }
+  .p-mast { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 14px; border-bottom: 3px solid var(--gold); background: var(--z-ground-2); }
+  .p-mark { font: 30px/1 var(--fontpack-display); letter-spacing: .06em; color: var(--z-ink); text-decoration: none; }
+  .p-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 4px 14px 2px; border: 3px solid var(--z-ink); background: var(--z-accent); color: var(--z-on-accent); font: 21px/1 var(--fontpack-mono); letter-spacing: .08em; text-decoration: none; }
+  .p-btn.ghost { background: transparent; color: var(--z-ink); }
+  .p-btn:focus-visible, .p-tile a:focus-visible, .p-card:focus-visible { outline: 3px dotted var(--z-focus); outline-offset: 3px; }
+  .p-wrap { max-width: 1280px; margin: 0 auto; padding: 0 0 120px; }
+  .p-crumbs { display: flex; flex-wrap: wrap; gap: 2px 0; padding: 12px 14px 0; font: 20px/1.3 var(--fontpack-mono); letter-spacing: .06em; word-break: break-all; }
+  .p-crumbs a { color: var(--z-accent); text-decoration: none; padding: 6px 0; }
+  .p-crumbs .sep { margin: 0 7px; color: var(--gold); }
+  .p-crumbs .here { padding: 6px 0; }
+  .p-title { padding: 14px 14px 6px; }
+  .p-title h1 { margin: 0; font: 400 40px/1.05 var(--fontpack-display); letter-spacing: .04em; word-break: break-word; }
+  .p-title p { margin: 4px 0 0; color: var(--z-muted); font: 19px/1.3 var(--fontpack-mono); }
+  .p-privacy { margin: 0 14px; font: 19px/1.3 var(--fontpack-mono); color: var(--z-muted); }
+  .p-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 14px 0; }
+  .p-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 14px; }
+  .p-card { display: grid; justify-items: start; gap: 10px; padding: 14px 12px 12px; border: 3px solid var(--gold); background: var(--z-ground-2); color: var(--z-ink); text-decoration: none; }
+  .p-card .ic { color: var(--gold-bright); --px: 6px; }
+  .p-card b { font: 400 22px/1.1 var(--fontpack-mono); letter-spacing: .05em; word-break: break-word; }
+  .p-day { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 10px; padding: 12px 14px 6px; background: var(--z-ground); font: 22px/1 var(--fontpack-mono); letter-spacing: .06em; }
+  .p-day .n { font-size: 19px; color: var(--z-muted); }
+  .p-day .save { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 10px; border: 2px solid var(--gold-bright); color: var(--gold-bright); text-decoration: none; font-size: 19px; }
+  .p-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; padding: 3px 3px 0; }
+  .p-tile { position: relative; aspect-ratio: 1; overflow: hidden; background: var(--tile); color: #f0dfc8; }
+  .p-tile > a { position: absolute; inset: 0; display: block; color: inherit; text-decoration: none; }
+  .p-tile img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; font: 16px/1.2 var(--fontpack-mono); color: #a5887b; word-break: break-all; padding: 4px; }
+  .p-tile .glyph { position: absolute; inset: 0; display: grid; place-items: center; align-content: center; gap: 6px; padding: 6px; text-align: center; font: 16px/1.15 var(--fontpack-mono); color: var(--z-ink); word-break: break-all; }
+  .p-tile .glyph .ic { color: var(--gold-bright); --px: 4px; }
+  .p-tile.video { background: #1a0d0f; }
+  .p-tile .tag { position: absolute; left: 4px; bottom: 4px; padding: 0 4px; background: rgba(14,7,8,.86); font: 16px/1.1 var(--fontpack-mono); letter-spacing: .04em; color: #f0dfc8; }
+  .p-tile .heic { position: absolute; right: 4px; top: 4px; padding: 0 4px; background: rgba(14,7,8,.86); color: var(--gold-bright); font: 15px/1.15 var(--fontpack-mono); letter-spacing: .06em; }
+  .p-tile .mark { position: absolute; right: 6px; bottom: 6px; display: none; place-items: center; width: 30px; height: 30px; background: var(--gold-bright); color: #1a0d0f; }
+  .p-tile.picked { outline: 4px solid var(--gold-bright); outline-offset: -4px; }
+  .p-tile.picked .mark { display: grid; }
+  .p-tile.picked img { opacity: .7; }
+  .p-other { padding: 10px 14px 0; display: grid; gap: 6px; }
+  .p-row { display: grid; grid-template-columns: 40px 1fr auto; gap: 12px; align-items: center; min-height: 56px; padding: 6px 10px; border: 2px solid var(--z-line); background: var(--z-ground-2); color: var(--z-ink); text-decoration: none; }
+  .p-row .ic { color: var(--gold-bright); --px: 3px; }
+  .p-row .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .p-row .sz { font: 17px/1 var(--fontpack-mono); color: var(--z-muted); }
+  .p-empty { padding: 34px 18px; text-align: center; color: var(--z-muted); }
+  .p-empty h2 { margin: 0 0 6px; font: 400 32px/1.1 var(--fontpack-display); color: var(--z-ink); }
+  .p-dock { position: fixed; z-index: 50; left: 10px; right: 10px; bottom: calc(10px + env(safe-area-inset-bottom)); display: flex; gap: 8px; padding: 8px; border: 3px solid var(--gold); background: var(--z-ground); }
+  .p-dock .p-btn { flex: 1; min-height: 52px; font-size: 23px; }
+  .p-dock .ghost { flex: none; }
+  .p-dock .off { opacity: .5; pointer-events: none; }
+  .p-foot { margin: 18px 14px 0; font: 17px/1.3 var(--fontpack-mono); color: var(--z-muted); }
+  @media (min-width: 900px) {
+    .p-mast { padding: 10px 28px; }
+    .p-wrap { padding: 0 28px 120px; }
+    .p-crumbs, .p-title, .p-privacy, .p-actions, .p-other, .p-foot { padding-left: 0; padding-right: 0; margin-left: 0; margin-right: 0; }
+    .p-day { padding-left: 0; }
+    .p-cards { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); padding: 14px 0; }
+    .p-grid { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); padding: 3px 0 0; }
+    .p-dock { left: 50%; right: auto; translate: -50% 0; width: min(560px, 90vw); }
   }
 </style>
 </head>
 <body class="gesso">
-<!-- zanni:boil -->
-<!-- zanni:gesso -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs><symbol id="ic-folder" viewBox="0 0 10 8" shape-rendering="crispEdges"><rect x="0" y="0" width="4" height="1"/><rect x="0" y="1" width="1" height="1"/><rect fill-opacity=".32" x="1" y="1" width="2" height="1"/><rect x="3" y="1" width="7" height="1"/><rect x="0" y="2" width="1" height="1"/><rect fill-opacity=".32" x="1" y="2" width="8" height="1"/><rect x="9" y="2" width="1" height="1"/><rect x="0" y="3" width="1" height="1"/><rect fill-opacity=".32" x="1" y="3" width="8" height="1"/><rect x="9" y="3" width="1" height="1"/><rect x="0" y="4" width="1" height="1"/><rect fill-opacity=".32" x="1" y="4" width="8" height="1"/><rect x="9" y="4" width="1" height="1"/><rect x="0" y="5" width="1" height="1"/><rect fill-opacity=".32" x="1" y="5" width="8" height="1"/><rect x="9" y="5" width="1" height="1"/><rect x="0" y="6" width="1" height="1"/><rect fill-opacity=".32" x="1" y="6" width="8" height="1"/><rect x="9" y="6" width="1" height="1"/><rect x="0" y="7" width="10" height="1"/></symbol><symbol id="ic-photo" viewBox="0 0 10 7" shape-rendering="crispEdges"><rect x="0" y="0" width="10" height="1"/><rect x="0" y="1" width="1" height="1"/><rect fill-opacity=".32" x="1" y="1" width="8" height="1"/><rect x="9" y="1" width="1" height="1"/><rect x="0" y="2" width="1" height="1"/><rect fill-opacity=".32" x="1" y="2" width="4" height="1"/><rect x="5" y="2" width="2" height="1"/><rect fill-opacity=".32" x="7" y="2" width="2" height="1"/><rect x="9" y="2" width="1" height="1"/><rect x="0" y="3" width="1" height="1"/><rect fill-opacity=".32" x="1" y="3" width="4" height="1"/><rect x="5" y="3" width="2" height="1"/><rect fill-opacity=".32" x="7" y="3" width="2" height="1"/><rect x="9" y="3" width="1" height="1"/><rect x="0" y="4" width="1" height="1"/><rect fill-opacity=".32" x="1" y="4" width="2" height="1"/><rect x="3" y="4" width="1" height="1"/><rect fill-opacity=".32" x="4" y="4" width="6" height="1"/><rect x="0" y="5" width="1" height="1"/><rect fill-opacity=".32" x="1" y="5" width="1" height="1"/><rect x="2" y="5" width="3" height="1"/><rect fill-opacity=".32" x="5" y="5" width="2" height="1"/><rect x="7" y="5" width="1" height="1"/><rect fill-opacity=".32" x="8" y="5" width="1" height="1"/><rect x="9" y="5" width="1" height="1"/><rect x="0" y="6" width="10" height="1"/></symbol><symbol id="ic-video" viewBox="0 0 10 8" shape-rendering="crispEdges"><rect x="0" y="0" width="10" height="1"/><rect x="0" y="1" width="1" height="1"/><rect fill-opacity=".32" x="1" y="1" width="1" height="1"/><rect x="2" y="1" width="1" height="1"/><rect fill-opacity=".32" x="3" y="1" width="6" height="1"/><rect x="9" y="1" width="1" height="1"/><rect x="0" y="2" width="1" height="1"/><rect fill-opacity=".32" x="1" y="2" width="1" height="1"/><rect x="2" y="2" width="2" height="1"/><rect fill-opacity=".32" x="4" y="2" width="5" height="1"/><rect x="9" y="2" width="1" height="1"/><rect x="0" y="3" width="1" height="1"/><rect fill-opacity=".32" x="1" y="3" width="1" height="1"/><rect x="2" y="3" width="3" height="1"/><rect fill-opacity=".32" x="5" y="3" width="4" height="1"/><rect x="9" y="3" width="1" height="1"/><rect x="0" y="4" width="1" height="1"/><rect fill-opacity=".32" x="1" y="4" width="1" height="1"/><rect x="2" y="4" width="2" height="1"/><rect fill-opacity=".32" x="4" y="4" width="5" height="1"/><rect x="9" y="4" width="1" height="1"/><rect x="0" y="5" width="1" height="1"/><rect fill-opacity=".32" x="1" y="5" width="1" height="1"/><rect x="2" y="5" width="1" height="1"/><rect fill-opacity=".32" x="3" y="5" width="6" height="1"/><rect x="9" y="5" width="1" height="1"/><rect x="0" y="6" width="1" height="1"/><rect fill-opacity=".32" x="1" y="6" width="8" height="1"/><rect x="9" y="6" width="1" height="1"/><rect x="0" y="7" width="10" height="1"/></symbol><symbol id="ic-pdf" viewBox="0 0 8 10" shape-rendering="crispEdges"><rect x="0" y="0" width="5" height="1"/><rect x="0" y="1" width="1" height="1"/><rect fill-opacity=".32" x="1" y="1" width="4" height="1"/><rect x="5" y="1" width="2" height="1"/><rect x="0" y="2" width="1" height="1"/><rect fill-opacity=".32" x="1" y="2" width="4" height="1"/><rect x="5" y="2" width="1" height="1"/><rect fill-opacity=".32" x="6" y="2" width="1" height="1"/><rect x="7" y="2" width="1" height="1"/><rect x="0" y="3" width="1" height="1"/><rect fill-opacity=".32" x="1" y="3" width="4" height="1"/><rect x="5" y="3" width="3" height="1"/><rect x="0" y="4" width="1" height="1"/><rect fill-opacity=".32" x="1" y="4" width="6" height="1"/><rect x="7" y="4" width="1" height="1"/><rect x="0" y="5" width="1" height="1"/><rect fill-opacity=".32" x="1" y="5" width="1" height="1"/><rect x="2" y="5" width="4" height="1"/><rect fill-opacity=".32" x="6" y="5" width="1" height="1"/><rect x="7" y="5" width="1" height="1"/><rect x="0" y="6" width="1" height="1"/><rect fill-opacity=".32" x="1" y="6" width="6" height="1"/><rect x="7" y="6" width="1" height="1"/><rect x="0" y="7" width="1" height="1"/><rect fill-opacity=".32" x="1" y="7" width="1" height="1"/><rect x="2" y="7" width="4" height="1"/><rect fill-opacity=".32" x="6" y="7" width="1" height="1"/><rect x="7" y="7" width="1" height="1"/><rect x="0" y="8" width="1" height="1"/><rect fill-opacity=".32" x="1" y="8" width="6" height="1"/><rect x="7" y="8" width="1" height="1"/><rect x="0" y="9" width="8" height="1"/></symbol><symbol id="ic-check" viewBox="0 0 9 7" shape-rendering="crispEdges"><rect x="8" y="0" width="1" height="1"/><rect x="7" y="1" width="2" height="1"/><rect x="0" y="2" width="1" height="1"/><rect x="6" y="2" width="2" height="1"/><rect x="0" y="3" width="2" height="1"/><rect x="5" y="3" width="2" height="1"/><rect x="1" y="4" width="2" height="1"/><rect x="4" y="4" width="2" height="1"/><rect x="2" y="5" width="3" height="1"/><rect x="3" y="6" width="1" height="1"/></symbol><symbol id="ic-warn" viewBox="0 0 9 9" shape-rendering="crispEdges"><rect x="0" y="0" width="9" height="1"/><rect x="0" y="1" width="1" height="1"/><rect fill-opacity=".32" x="1" y="1" width="3" height="1"/><rect x="4" y="1" width="1" height="1"/><rect fill-opacity=".32" x="5" y="1" width="3" height="1"/><rect x="8" y="1" width="1" height="1"/><rect x="0" y="2" width="1" height="1"/><rect fill-opacity=".32" x="1" y="2" width="3" height="1"/><rect x="4" y="2" width="1" height="1"/><rect fill-opacity=".32" x="5" y="2" width="3" height="1"/><rect x="8" y="2" width="1" height="1"/><rect x="0" y="3" width="1" height="1"/><rect fill-opacity=".32" x="1" y="3" width="3" height="1"/><rect x="4" y="3" width="1" height="1"/><rect fill-opacity=".32" x="5" y="3" width="3" height="1"/><rect x="8" y="3" width="1" height="1"/><rect x="0" y="4" width="1" height="1"/><rect fill-opacity=".32" x="1" y="4" width="3" height="1"/><rect x="4" y="4" width="1" height="1"/><rect fill-opacity=".32" x="5" y="4" width="3" height="1"/><rect x="8" y="4" width="1" height="1"/><rect x="0" y="5" width="1" height="1"/><rect fill-opacity=".32" x="1" y="5" width="7" height="1"/><rect x="8" y="5" width="1" height="1"/><rect x="0" y="6" width="1" height="1"/><rect fill-opacity=".32" x="1" y="6" width="3" height="1"/><rect x="4" y="6" width="1" height="1"/><rect fill-opacity=".32" x="5" y="6" width="3" height="1"/><rect x="8" y="6" width="1" height="1"/><rect x="0" y="7" width="1" height="1"/><rect fill-opacity=".32" x="1" y="7" width="7" height="1"/><rect x="8" y="7" width="1" height="1"/><rect x="0" y="8" width="9" height="1"/></symbol><symbol id="ic-pause" viewBox="0 0 7 9" shape-rendering="crispEdges"><rect x="0" y="0" width="3" height="1"/><rect x="4" y="0" width="3" height="1"/><rect x="0" y="1" width="3" height="1"/><rect x="4" y="1" width="3" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="4" y="2" width="3" height="1"/><rect x="0" y="3" width="3" height="1"/><rect x="4" y="3" width="3" height="1"/><rect x="0" y="4" width="3" height="1"/><rect x="4" y="4" width="3" height="1"/><rect x="0" y="5" width="3" height="1"/><rect x="4" y="5" width="3" height="1"/><rect x="0" y="6" width="3" height="1"/><rect x="4" y="6" width="3" height="1"/><rect x="0" y="7" width="3" height="1"/><rect x="4" y="7" width="3" height="1"/><rect x="0" y="8" width="3" height="1"/><rect x="4" y="8" width="3" height="1"/></symbol><symbol id="ic-play" viewBox="0 0 7 9" shape-rendering="crispEdges"><rect x="0" y="0" width="1" height="1"/><rect x="0" y="1" width="2" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="0" y="3" width="4" height="1"/><rect x="0" y="4" width="5" height="1"/><rect x="0" y="5" width="4" height="1"/><rect x="0" y="6" width="3" height="1"/><rect x="0" y="7" width="2" height="1"/><rect x="0" y="8" width="1" height="1"/></symbol><symbol id="ic-plus" viewBox="0 0 9 9" shape-rendering="crispEdges"><rect x="3" y="0" width="3" height="1"/><rect x="3" y="1" width="3" height="1"/><rect x="3" y="2" width="3" height="1"/><rect x="0" y="3" width="9" height="1"/><rect x="0" y="4" width="9" height="1"/><rect x="0" y="5" width="9" height="1"/><rect x="3" y="6" width="3" height="1"/><rect x="3" y="7" width="3" height="1"/><rect x="3" y="8" width="3" height="1"/></symbol><symbol id="ic-next" viewBox="0 0 5 9" shape-rendering="crispEdges"><rect x="0" y="0" width="1" height="1"/><rect x="0" y="1" width="2" height="1"/><rect x="1" y="2" width="2" height="1"/><rect x="2" y="3" width="2" height="1"/><rect x="3" y="4" width="2" height="1"/><rect x="2" y="5" width="2" height="1"/><rect x="1" y="6" width="2" height="1"/><rect x="0" y="7" width="2" height="1"/><rect x="0" y="8" width="1" height="1"/></symbol><symbol id="ic-prev" viewBox="0 0 5 9" shape-rendering="crispEdges"><rect x="4" y="0" width="1" height="1"/><rect x="3" y="1" width="2" height="1"/><rect x="2" y="2" width="2" height="1"/><rect x="1" y="3" width="2" height="1"/><rect x="0" y="4" width="2" height="1"/><rect x="1" y="5" width="2" height="1"/><rect x="2" y="6" width="2" height="1"/><rect x="3" y="7" width="2" height="1"/><rect x="4" y="8" width="1" height="1"/></symbol><symbol id="ic-down" viewBox="0 0 9 9" shape-rendering="crispEdges"><rect x="3" y="0" width="3" height="1"/><rect x="3" y="1" width="3" height="1"/><rect x="3" y="2" width="3" height="1"/><rect x="1" y="3" width="7" height="1"/><rect x="2" y="4" width="5" height="1"/><rect x="3" y="5" width="3" height="1"/><rect x="4" y="6" width="1" height="1"/><rect x="0" y="7" width="1" height="1"/><rect x="8" y="7" width="1" height="1"/><rect x="0" y="8" width="9" height="1"/></symbol><symbol id="ic-up" viewBox="0 0 9 9" shape-rendering="crispEdges"><rect x="4" y="0" width="1" height="1"/><rect x="3" y="1" width="3" height="1"/><rect x="2" y="2" width="5" height="1"/><rect x="1" y="3" width="7" height="1"/><rect x="3" y="4" width="3" height="1"/><rect x="3" y="5" width="3" height="1"/><rect x="3" y="6" width="3" height="1"/><rect x="0" y="7" width="1" height="1"/><rect x="8" y="7" width="1" height="1"/><rect x="0" y="8" width="9" height="1"/></symbol><symbol id="ic-close" viewBox="0 0 7 7" shape-rendering="crispEdges"><rect x="0" y="0" width="1" height="1"/><rect x="6" y="0" width="1" height="1"/><rect x="1" y="1" width="1" height="1"/><rect x="5" y="1" width="1" height="1"/><rect x="2" y="2" width="1" height="1"/><rect x="4" y="2" width="1" height="1"/><rect x="3" y="3" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/><rect x="4" y="4" width="1" height="1"/><rect x="1" y="5" width="1" height="1"/><rect x="5" y="5" width="1" height="1"/><rect x="0" y="6" width="1" height="1"/><rect x="6" y="6" width="1" height="1"/></symbol><symbol id="ic-lock" viewBox="0 0 7 9" shape-rendering="crispEdges"><rect x="2" y="0" width="3" height="1"/><rect x="1" y="1" width="1" height="1"/><rect x="5" y="1" width="1" height="1"/><rect x="1" y="2" width="1" height="1"/><rect x="5" y="2" width="1" height="1"/><rect x="0" y="3" width="7" height="1"/><rect x="0" y="4" width="1" height="1"/><rect fill-opacity=".32" x="1" y="4" width="5" height="1"/><rect x="6" y="4" width="1" height="1"/><rect x="0" y="5" width="1" height="1"/><rect fill-opacity=".32" x="1" y="5" width="2" height="1"/><rect x="3" y="5" width="1" height="1"/><rect fill-opacity=".32" x="4" y="5" width="2" height="1"/><rect x="6" y="5" width="1" height="1"/><rect x="0" y="6" width="1" height="1"/><rect fill-opacity=".32" x="1" y="6" width="2" height="1"/><rect x="3" y="6" width="1" height="1"/><rect fill-opacity=".32" x="4" y="6" width="2" height="1"/><rect x="6" y="6" width="1" height="1"/><rect x="0" y="7" width="1" height="1"/><rect fill-opacity=".32" x="1" y="7" width="5" height="1"/><rect x="6" y="7" width="1" height="1"/><rect x="0" y="8" width="7" height="1"/></symbol><symbol id="ic-glass" viewBox="0 0 7 9" shape-rendering="crispEdges"><rect x="0" y="0" width="7" height="1"/><rect x="0" y="1" width="1" height="1"/><rect x="6" y="1" width="1" height="1"/><rect x="1" y="2" width="1" height="1"/><rect x="5" y="2" width="1" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="4" y="3" width="1" height="1"/><rect x="3" y="4" width="1" height="1"/><rect x="2" y="5" width="1" height="1"/><rect x="4" y="5" width="1" height="1"/><rect x="1" y="6" width="1" height="1"/><rect x="5" y="6" width="1" height="1"/><rect x="0" y="7" width="1" height="1"/><rect x="2" y="7" width="3" height="1"/><rect x="6" y="7" width="1" height="1"/><rect x="0" y="8" width="7" height="1"/></symbol><symbol id="ic-sun" viewBox="0 0 9 9" shape-rendering="crispEdges"><rect x="4" y="0" width="1" height="1"/><rect x="1" y="1" width="1" height="1"/><rect x="4" y="1" width="1" height="1"/><rect x="7" y="1" width="1" height="1"/><rect x="2" y="2" width="5" height="1"/><rect x="3" y="3" width="3" height="1"/><rect x="0" y="4" width="4" height="1"/><rect fill-opacity=".32" x="4" y="4" width="1" height="1"/><rect x="5" y="4" width="4" height="1"/><rect x="3" y="5" width="3" height="1"/><rect x="2" y="6" width="5" height="1"/><rect x="1" y="7" width="1" height="1"/><rect x="4" y="7" width="1" height="1"/><rect x="7" y="7" width="1" height="1"/><rect x="4" y="8" width="1" height="1"/></symbol><symbol id="ic-list" viewBox="0 0 9 8" shape-rendering="crispEdges"><rect x="0" y="0" width="2" height="1"/><rect x="3" y="0" width="6" height="1"/><rect x="0" y="1" width="2" height="1"/><rect x="3" y="1" width="6" height="1"/><rect x="0" y="3" width="2" height="1"/><rect x="3" y="3" width="6" height="1"/><rect x="0" y="4" width="2" height="1"/><rect x="3" y="4" width="6" height="1"/><rect x="0" y="6" width="2" height="1"/><rect x="3" y="6" width="6" height="1"/><rect x="0" y="7" width="2" height="1"/><rect x="3" y="7" width="6" height="1"/></symbol><symbol id="ic-grid" viewBox="0 0 7 7" shape-rendering="crispEdges"><rect x="0" y="0" width="3" height="1"/><rect x="4" y="0" width="3" height="1"/><rect x="0" y="1" width="3" height="1"/><rect x="4" y="1" width="3" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="4" y="2" width="3" height="1"/><rect x="0" y="4" width="3" height="1"/><rect x="4" y="4" width="3" height="1"/><rect x="0" y="5" width="3" height="1"/><rect x="4" y="5" width="3" height="1"/><rect x="0" y="6" width="3" height="1"/><rect x="4" y="6" width="3" height="1"/></symbol></defs></svg>
+<header class="p-mast">
+  <a class="p-mark" href="/">files</a>
+  {% if upload_href %}<a class="p-btn" href="{{ upload_href }}"><svg class="ic" style="--w:9;--h:9;--px:2px" viewBox="0 0 9 9" aria-hidden="true"><use href="#ic-up"/></svg> Upload</a>{% endif %}
+</header>
 
-<main>
-  <div class="crumbs boil-text">
-    <a href="/">files</a>{% for c in crumbs %}<span class="sep">/</span>{% if loop.last %}<span class="here">{{ c.name }}</span>{% else %}<a href="{{ c.href }}">{{ c.name }}</a>{% endif %}{% endfor %}
+<main class="p-wrap">
+  <nav class="p-crumbs" aria-label="Where you are">
+    {% if not mine %}<a href="/">files</a>{% endif %}{% for c in crumbs %}{% if not (loop.first and mine) %}<span class="sep">/</span>{% endif %}{% if loop.last %}<span class="here">{{ c.name }}</span>{% else %}<a href="{{ c.href }}">{{ c.name }}</a>{% endif %}{% endfor %}
+  </nav>
+
+  <div class="p-title"><h1>{{ heading }}</h1><p>{{ tally }}</p></div>
+  {% if is_home %}<p class="p-privacy">Only you can see these.</p>{% endif %}
+
+  {% if select %}
+  <div class="p-actions"><span class="p-title" style="padding:0"><p>Tap photos to pick up to {{ pick_cap }}.</p></span></div>
+  {% elif save_href or select_href %}
+  <div class="p-actions">
+    {% if save_href %}<a class="p-btn" href="{{ save_href }}"><svg class="ic" style="--w:9;--h:9;--px:2px" viewBox="0 0 9 9" aria-hidden="true"><use href="#ic-down"/></svg> To iPhone</a>{% endif %}
+    {% if select_href %}<a class="p-btn ghost" href="{{ select_href }}">Select</a>{% endif %}
   </div>
+  {% endif %}
 
-  <h1 class="boil-text">{{ heading }}</h1>
-  <div class="tally boil-text">{{ tally }}</div>
-
-  <div class="sheet boil-ui">
-    {% if dirs or files %}
-    <table>
-      <thead>
-        <tr>
-          <th></th>
-          <th>Name</th>
-          <th class="num">Size</th>
-          <th class="when">Modified</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% if parent is not none %}
-        <tr>
-          <td class="glyph">&#8593;</td>
-          <td class="name"><a class="dir" href="{{ parent }}">..</a></td>
-          <td class="size"></td>
-          <td class="when"></td>
-        </tr>
-        {% endif %}
-        {% for d in dirs %}
-        <tr>
-          <td class="glyph">&#9635;</td>
-          <td class="name"><a class="dir" href="{{ d.href }}">{{ d.name }}/</a></td>
-          <td class="size"></td>
-          <td class="when"></td>
-        </tr>
-        {% endfor %}
-        {% for f in files %}
-        <tr>
-          <td class="glyph">&#9671;</td>
-          <td class="name"><a href="{{ f.viewer or f.href }}">{{ f.name }}</a></td>
-          <td class="size">{{ f.size }}</td>
-          <td class="when">{{ f.when }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% else %}
-    <div class="empty">Nothing here.</div>
-    {% endif %}
+  {% if dirs %}
+  <div class="p-cards">
+    {% for d in dirs %}<a class="p-card" href="{{ d.href }}"><svg class="ic" style="--w:10;--h:8;--px:3px" viewBox="0 0 10 8" aria-hidden="true"><use href="#ic-folder"/></svg><b>{{ d.name }}</b></a>{% endfor %}
   </div>
+  {% endif %}
 
-  {% if save_href %}<p class="tally boil-text"><a href="{{ save_href }}">Save photos to your phone</a></p>{% endif %}
+  {% for day in days %}
+  <div class="p-day"><span>{{ day.label }}</span><span class="n">{{ day.files|length }}</span>{% if day_href and not select %}<a class="save" href="{{ day_href(day.month) }}"><svg class="ic" style="--w:9;--h:9;--px:2px" viewBox="0 0 9 9" aria-hidden="true"><use href="#ic-down"/></svg> Save day</a>{% endif %}</div>
+  <div class="p-grid">
+    {% for f in day.files %}
+    <div class="p-tile {{ f.kind }}{% if f.picked %} picked{% endif %}"><a href="{{ f.toggle if select else (f.viewer or f.href) }}">
+      {% if f.kind == 'image' %}<img loading="lazy" decoding="async" src="{{ f.href }}" alt="{{ f.name }}">
+      {% else %}<span class="glyph"><svg class="ic" style="--w:7;--h:9;--px:3px" viewBox="0 0 7 9" aria-hidden="true"><use href="#ic-play"/></svg>{{ f.name }}</span>{% endif %}
+      {% if f.heic %}<span class="heic">HEIC</span>{% endif %}
+      <span class="mark"><svg class="ic" style="--w:9;--h:7;--px:3px" viewBox="0 0 9 7" aria-hidden="true"><use href="#ic-check"/></svg></span>
+    </a></div>
+    {% endfor %}
+  </div>
+  {% endfor %}
 
-  <footer class="boil-text">{{ bucket }} on spain{% if truncated %} &middot; listing truncated at {{ shown }} entries{% endif %}</footer>
+  {% if other %}
+  <div class="p-other">
+    {% for f in other %}<a class="p-row" href="{{ f.viewer or f.href }}"><svg class="ic" style="--w:8;--h:10;--px:3px" viewBox="0 0 8 10" aria-hidden="true"><use href="#ic-pdf"/></svg><span class="nm">{{ f.name }}</span><span class="sz">{{ f.size }}</span></a>{% endfor %}
+  </div>
+  {% endif %}
+
+  {% if not dirs and not files %}<div class="p-empty"><h2>Nothing here yet</h2><p>Photos and videos you upload show up here.</p>{% if upload_href %}<a class="p-btn" href="{{ upload_href }}"><svg class="ic" style="--w:9;--h:9;--px:2px" viewBox="0 0 9 9" aria-hidden="true"><use href="#ic-up"/></svg> Upload photos</a>{% endif %}</div>{% endif %}
+
+  <p class="p-foot">{{ bucket }} on spain{% if truncated %} &middot; listing truncated at {{ shown }} entries{% endif %}</p>
 </main>
+
+{% if select %}
+<div class="p-dock">
+  <a class="p-btn ghost" href="{{ done_href }}">Done</a>
+  {% if picks %}<a class="p-btn" href="{{ pick_href }}">Save {{ picks }} to iPhone</a><a class="p-btn ghost" href="{{ clear_href }}">Clear</a>
+  {% else %}<span class="p-btn off">Pick some photos</span>{% endif %}
+</div>
+{% endif %}
 </body>
 </html>

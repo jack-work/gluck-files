@@ -27,17 +27,36 @@ class FakeBucket:
         self.page = page
         self.gets = 0
 
-    def list_objects_v2(self, Bucket, Prefix="", MaxKeys=1000, ContinuationToken=None, **_):
+    def list_objects_v2(self, Bucket, Prefix="", MaxKeys=1000, ContinuationToken=None, Delimiter=None, **_):
         keys = sorted(k for k in self.objects if k.startswith(Prefix))
+        entries, seen = [], set()
+        for k in keys:
+            rest = k[len(Prefix):]
+            if Delimiter and Delimiter in rest:
+                cp = Prefix + rest.split(Delimiter)[0] + Delimiter
+                if cp not in seen:
+                    seen.add(cp)
+                    entries.append(("p", cp))
+            else:
+                entries.append(("k", k))
         start = int(ContinuationToken or 0)
-        window = keys[start:start + self.page]
-        more = start + self.page < len(keys)
+        window = entries[start:start + self.page]
+        more = start + self.page < len(entries)
         return {
             "Contents": [{"Key": k, "Size": len(self.objects[k]),
-                          "LastModified": datetime(2026, 11, 26, 1, 30, tzinfo=timezone.utc)} for k in window],
+                          "LastModified": datetime(2026, 11, 26, 1, 30, tzinfo=timezone.utc)} for t, k in window if t == "k"],
+            "CommonPrefixes": [{"Prefix": k} for t, k in window if t == "p"],
             "IsTruncated": more,
             "NextContinuationToken": str(start + self.page) if more else None,
         }
+
+    def head_object(self, Bucket, Key, **_):
+        if Key not in self.objects:
+            raise ClientError({"Error": {"Code": "404"}}, "HeadObject")
+        ext = Key.rsplit(".", 1)[-1].lower()
+        kind = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "heic": "image/heic", "mp4": "video/mp4"}.get(ext, "application/octet-stream")
+        return {"ContentType": kind, "ContentLength": len(self.objects[Key]),
+                "LastModified": datetime(2026, 11, 26, 1, 30, tzinfo=timezone.utc)}
 
     def get_object(self, Bucket, Key, **_):
         self.gets += 1

@@ -1,0 +1,11 @@
+:root { color-scheme: dark; }
+:root[data-scheme=light] { color-scheme: light; }
+.mast { border-bottom: 3px solid var(--gold); background: var(--z-ground-2); }
+h1 { font-size: 44px; }
+.pick { border: 3px solid var(--gold-bright); background: var(--z-ground-2); padding: 34px 16px; box-shadow: 6px 6px 0 var(--z-shadow); }
+li { border: 3px solid var(--z-line); border-left-width: 3px; }
+li.busy { border-color: var(--gold-bright); }
+.bar { height: 8px; border: 0; background: var(--z-line); }
+.bar > span { background: var(--gold-bright); }
+li.done .bar > span { background: var(--z-ok); }
+#summary { position: sticky; bottom: 0; padding: 10px 0; background: var(--z-ground); font-size: 24px; }

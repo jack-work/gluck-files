@@ -86,6 +86,31 @@ def month_of(rel, modified=None, manifest=None):
     return UNDATED
 
 
+def day_of(rel, modified=None):
+    base = rel.rsplit("/", 1)[-1]
+    for rx in (DATE, DASHED):
+        m = rx.search(base)
+        if m:
+            return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+    if modified is not None:
+        return modified.strftime("%Y-%m-%d")
+    return UNDATED
+
+
+IMAGES = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif")
+
+
+def kind_of(name):
+    low = name.lower()
+    if low.endswith(IMAGES):
+        return "image"
+    if low.endswith(VIDEOS):
+        return "video"
+    if low.endswith(".pdf"):
+        return "pdf"
+    return "other"
+
+
 def batches_of(files):
     photos = [f for f in files if not is_video(f["rel"])]
     videos = [f for f in files if is_video(f["rel"])]
@@ -255,6 +280,9 @@ def register(app, *, place, caller, acl, page_dir, refuse, ok, log):
             token = page.get("NextContinuationToken")
             if not token:
                 break
+        picks = set(request.args.getlist("pick"))
+        if picks:
+            files = [f for f in files if f["rel"] in picks]
         files.sort(key=lambda f: f["rel"].lower())
         return files
 
@@ -297,7 +325,7 @@ def register(app, *, place, caller, acl, page_dir, refuse, ok, log):
                              "bytes": sum(f["size"] for f in b)} for i, b in enumerate(bs)],
             })
         return ok({"user": user, "root": root, "base": f"/users/{user}/{root}",
-                   "batchFiles": BATCH_FILES, "batchBytes": BATCH_BYTES, "months": out,
+                   "picked": len(request.args.getlist("pick")), "batchFiles": BATCH_FILES, "batchBytes": BATCH_BYTES, "months": out,
                    "truncated": len(files) >= MAX_LISTED})
 
     @app.get("/_save/api/zip")

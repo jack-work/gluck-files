@@ -23,7 +23,7 @@
       listerTemplateFor = pkgs: pkgs.runCommand "gluck-files-lister-template.html" {
         nativeBuildInputs = [ zanni.packages.${pkgs.system}.default ];
       } ''
-        zanni-inline -c boil -c gesso -c fontpack \
+        zanni-inline -c gesso -c fontpack \
           ${./lister/template.html.in} -o $out
         zanni-check $out
       '';

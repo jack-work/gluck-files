@@ -162,6 +162,11 @@ def script():
     return static("app.js", "text/javascript; charset=utf-8")
 
 
+@app.get("/_upload/provino.css")
+def provino_style():
+    return static("provino.css", "text/css; charset=utf-8")
+
+
 @app.get("/_upload/app.css")
 def style():
     return static("app.css", "text/css; charset=utf-8")

@@ -34,7 +34,7 @@ const browser = await pw[kind].launch(launch);
 const objects = await (await fetch(base + "/_rig/objects")).json();
 
 async function open({ share, user = "pilar" }) {
-  const ctx = await browser.newContext({ ...device, extraHTTPHeaders: user ? { "Remote-User": user } : {}, baseURL: base });
+  const ctx = await browser.newContext({ ...device, extraHTTPHeaders: user ? { "Remote-User": user, Host: "files.kelliher.info" } : {}, baseURL: base });
   if (share) await ctx.addInitScript(STUB);
   const page = await ctx.newPage();
   const problems = [];
@@ -139,6 +139,93 @@ await test("someone else's account sees no photos", async () => {
   const { ctx, page } = await open({ share: true, user: "dadxx" });
   await page.waitForFunction(() => /no photos folder/.test(document.getElementById("lede").textContent));
   assert.equal(await page.$$eval("details.month", (e) => e.length), 0);
+  await ctx.close();
+});
+
+const LIST = "/users/pilar/photos/DCIM/Camera/";
+
+await test("provino listing: date-headed tiles, no script allowed, links to the save page", async () => {
+  const { ctx, page, problems } = await open({ share: true });
+  const r = await page.goto(LIST);
+  const csp = r.headers()["content-security-policy"];
+  assert.match(csp, /default-src 'none'/);
+  assert.doesNotMatch(csp, /script-src/);
+  assert.match(csp, /form-action 'none'/);
+  assert.equal(await page.$$eval("script", (e) => e.length), 0);
+  const heads = await page.$$eval(".p-day span:first-child", (e) => e.map((x) => x.textContent));
+  assert.ok(heads.length >= 3 && heads.every((h) => /\d{4}$/.test(h)), heads.join("|"));
+  assert.ok((await page.$$eval(".p-tile", (e) => e.length)) >= 50);
+  assert.equal(await page.$$eval(".p-tile img[alt^='.']", (e) => e.length), 0, "hidden files are not shown");
+  assert.equal(await page.getAttribute(".p-actions a.p-btn:not(.ghost)", "href"), "/_save/?root=photos%2FDCIM%2FCamera%2F");
+  assert.equal(await page.getAttribute(".p-mast a.p-btn", "href"), "/_upload/");
+  const day = await page.getAttribute(".p-day .save >> nth=0", "href");
+  assert.match(day, /^\/_save\/\?root=photos%2FDCIM%2FCamera%2F&month=\d{4}-\d\d$/);
+  await ctx.close();
+});
+
+await test("Save day opens the save page with that month expanded and a way back", async () => {
+  const { ctx, page } = await open({ share: true });
+  await page.goto(LIST);
+  const href = await page.getAttribute(".p-day .save >> nth=1", "href");
+  const month = new URL(href, "http://x").searchParams.get("month");
+  await page.click(".p-day .save >> nth=1");
+  await page.waitForSelector("details.month[open]");
+  assert.equal(await page.$eval("details.month[open]", (e) => e.dataset.month), month);
+  assert.equal(await page.textContent("#back"), "Back to Camera");
+  await page.click("#back");
+  await page.waitForSelector(".p-grid");
+  assert.match(page.url(), /\/users\/pilar\/photos\/DCIM\/Camera\/$/);
+  await ctx.close();
+});
+
+await test("select view: tiles toggle by link, then only the picked files are saved", async () => {
+  const { ctx, page, problems } = await open({ share: true });
+  await page.goto(LIST);
+  await page.click("a.p-btn.ghost");
+  await page.waitForSelector(".p-dock");
+  assert.equal(await page.$$eval("form", (e) => e.length), 0, "no form, so form-action 'none' is fine");
+  for (let i = 0; i < 3; i++) await page.click(".p-tile:not(.picked) > a >> nth=" + i);
+  assert.equal(await page.$$eval(".p-tile.picked", (e) => e.length), 3);
+  const names = await page.$$eval(".p-tile.picked img", (e) => e.map((x) => x.alt).sort());
+  await page.click("text=Save 3 to iPhone");
+  await page.waitForSelector("details.month");
+  assert.equal(await page.textContent("#title"), "Save 3 picked");
+  const shown = await page.$$eval("details.month .mmeta", (e) => e.map((x) => x.textContent).join(" "));
+  assert.match(shown, /\b[123] files?\b/);
+  await page.click("details.month > summary >> nth=0");
+  await page.click("details.month .part button >> nth=0");
+  await page.waitForSelector("#jobSave:not([hidden])", { timeout: 20000 });
+  await page.click("#jobSave");
+  await page.waitForFunction(() => window.__shares.length === 1);
+  const sent = await page.evaluate(() => window.__shares[0].map((x) => x.name));
+  assert.ok(sent.every((n) => names.includes(n)), sent + " vs " + names);
+  assert.deepEqual(problems, []);
+  await ctx.close();
+});
+
+await test("the viewer shows a photo and steps to the next one", async () => {
+  const { ctx, page } = await open({ share: true });
+  await page.goto(LIST);
+  const first = await page.getAttribute(".p-tile.image > a >> nth=0", "href");
+  assert.match(first, /\/_files\/view\?uri=/);
+  await page.goto(first);
+  await page.waitForSelector(".stage img", { state: "attached" });
+  assert.ok(await page.$(".arrow.r"), "a next arrow");
+  assert.equal(await page.$$eval("script", (e) => e.length), 0);
+  await ctx.close();
+});
+
+await test("someone else's folder gets no save links", async () => {
+  const { ctx, page } = await open({ share: true, user: "dadxx" });
+  const r = await page.goto(LIST);
+  assert.equal(r.status(), 404);
+  await ctx.close();
+});
+
+await test("the upload page wears the dark skin and still loads", async () => {
+  const { ctx, page, problems } = await open({ share: false });
+  await page.goto("/_upload/");
+  assert.equal(await page.$eval("body", (e) => getComputedStyle(e).colorScheme), "dark");
   await ctx.close();
 });
 

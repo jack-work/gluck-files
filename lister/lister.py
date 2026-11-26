@@ -27,7 +27,7 @@ import sys
 import threading
 import time
 from collections import OrderedDict
-from datetime import timezone
+from datetime import datetime, timezone
 from urllib.parse import quote, unquote
 
 import boto3
@@ -40,6 +40,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from acl import Acl, BadPath, canonical_object_uri, media_request, normalise
 from caption_gate import CaptionGate, ManifestUnavailable
 from place import Places, Unplaced
+from save import day_of, kind_of
+from urllib.parse import urlencode
 
 BUCKETS = frozenset(
     b for b in os.environ.get("LISTER_BUCKETS", "files").replace(",", " ").split() if b
@@ -258,6 +260,7 @@ def listing(bucket, prefix):
                     "size": human(obj.get("Size", 0)),
                     "bytes": obj.get("Size", 0),
                     "when": when(obj.get("LastModified")),
+                    "dt": obj.get("LastModified"),
                 }
             )
 
@@ -276,12 +279,14 @@ def listing(bucket, prefix):
 
 
 PLAYER_EXTENSIONS = (".mp3", ".m4a", ".aac", ".wav", ".oga", ".ogg", ".opus", ".flac",
-                     ".mp4", ".m4v", ".mov", ".webm", ".ogv")
+                     ".mp4", ".m4v", ".mov", ".webm", ".ogv",
+                     ".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif")
 
 
 PLAYER_TYPES = {t: t.split("/", 1)[0] for t in (
     "audio/mpeg", "audio/mp4", "audio/aac", "audio/wav", "audio/x-wav", "audio/ogg", "audio/opus",
     "audio/flac", "video/mp4", "video/x-m4v", "video/quicktime", "video/webm", "video/ogg")}
+PLAYER_TYPES.update({t: "image" for t in ("image/jpeg", "image/png", "image/webp", "image/gif", "image/heic", "image/heif")})
 
 
 def plays_in_viewer(key):
@@ -317,6 +322,44 @@ def reader_scheme():
     return scheme if scheme in SCHEMES else None
 
 
+DAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+MONTH_NAMES = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+PICK_CAP = 60
+
+
+def day_label(day):
+    try:
+        d = datetime.strptime(day, "%Y-%m-%d")
+    except ValueError:
+        return "No date"
+    return f"{DAY_NAMES[d.weekday()]} {d.day} {MONTH_NAMES[d.month - 1]} {d.year}"
+
+
+def provino(files, home_rel, prefix, select, picks):
+    """Group a folder's files into dated tiles, with plain-link select state."""
+    here = "/" + prefix
+    media, other = [], []
+    files = [f for f in files if not f["name"].startswith(".")]
+    for f in files:
+        f["kind"] = kind_of(f["name"])
+        f["day"] = day_of(f["name"], f.get("dt"))
+        f["heic"] = f["name"].lower().endswith((".heic", ".heif"))
+        f["picked"] = f["name"] in picks
+        (media if f["kind"] in ("image", "video") else other).append(f)
+    days = {}
+    for f in media:
+        days.setdefault(f["day"], []).append(f)
+    out = []
+    for day in sorted(days, reverse=True):
+        items = sorted(days[day], key=lambda f: f["name"].lower())
+        out.append({"day": day, "label": day_label(day), "month": day[:7], "files": items})
+    if select:
+        for f in media:
+            nxt = [n for n in sorted(picks) if n != f["name"]] if f["picked"] else sorted(picks | {f["name"]})
+            f["toggle"] = here + "?" + urlencode([("select", "1")] + [("pick", n) for n in nxt[:PICK_CAP]])
+    return out, other, len(media)
+
+
 def render(bucket, prefix, user, groups):
     may_list = ACL.allows(user, groups, prefix, "list")
 
@@ -329,6 +372,13 @@ def render(bucket, prefix, user, groups):
         dirs = [{"name": s.rstrip("/"), "href": "/" + prefix + s} for s in subs]
         files, truncated, shown = [], False, len(dirs)
 
+    home = "users/" + user + "/"
+    mine = prefix.startswith(home)
+    home_rel = prefix[len(home):] if mine else None
+    select = mine and request.args.get("select") == "1"
+    picks = set(request.args.getlist("pick")[:PICK_CAP]) if select else set()
+
+    days, other, nmedia = provino(files, home_rel, prefix, select, picks)
     total = sum(f["bytes"] for f in files)
     bits = []
     if dirs:
@@ -339,19 +389,47 @@ def render(bucket, prefix, user, groups):
     tally = " \u00b7 ".join(bits) if bits else "empty"
 
     name = [p for p in prefix.split("/") if p]
+    crumbs = crumbs_for(prefix)
+    heading = name[-1] if name else bucket
+    if mine:
+        crumbs = [{"name": "Your files", "href": "/" + home}] + [c for c in crumbs if len(c["href"]) > len(home) + 1]
+        heading = "Your files" if home_rel == "" else name[-1]
+
+    save_href = day_href = None
+    if mine and (nmedia or dirs):
+        save_href = "/_save/?" + urlencode({"root": home_rel})
+        day_href = lambda month: "/_save/?" + urlencode({"root": home_rel, "month": month})
+    here = "/" + prefix
+    pick_href = None
+    if select and picks:
+        pick_href = "/_save/?" + urlencode([("root", home_rel)] + [("pick", n) for n in sorted(picks)][:PICK_CAP + 1])
+
     return PAGE_TEMPLATE.render(
         scheme=reader_scheme(),
         title=("/" + prefix if prefix else bucket) + " \u00b7 kelliher.info",
-        heading=name[-1] if name else bucket,
-        crumbs=crumbs_for(prefix),
+        heading=heading,
+        crumbs=crumbs,
         parent=parent_of(prefix) if prefix else None,
         dirs=dirs,
         files=files,
+        days=days,
+        other=other,
         tally=tally,
         bucket=bucket,
         truncated=truncated,
         shown=shown,
-        save_href="/_save/" if prefix.startswith("users/" + user + "/") else None,
+        mine=mine,
+        is_home=mine and home_rel == "",
+        upload_href="/_upload/" if mine else None,
+        save_href=save_href,
+        day_href=day_href,
+        select_href=(here + "?select=1") if mine and nmedia and not select else None,
+        select=select,
+        picks=len(picks),
+        pick_href=pick_href,
+        done_href=here,
+        clear_href=here + "?select=1",
+        pick_cap=PICK_CAP,
     )
 
 
@@ -395,6 +473,42 @@ def refuse_when_overloaded():
     )
 
 
+VIEWER_PAGE = (
+    "<!doctype html><html lang=en{% if scheme %} data-scheme=\"{{ scheme }}\"{% endif %}>"
+    "<meta charset=utf-8><meta name=viewport content='width=device-width, initial-scale=1'>"
+    "<meta name=color-scheme content='dark light'>"
+    "<style>"
+    ":root{color-scheme:dark;--g:#d9a94e;--i:#f0dfc8;--m:#a5887b}:root[data-scheme=light]{color-scheme:light}"
+    "body{margin:0;background:#0a0506;color:var(--i);font:18px/1.4 ui-monospace,Menlo,Consolas,monospace}"
+    ".top{display:flex;align-items:center;gap:10px;padding:8px 10px}"
+    ".top a{display:inline-flex;align-items:center;min-height:44px;padding:0 12px;color:var(--i);text-decoration:none}"
+    ".top .dl{margin-left:auto;border:3px solid var(--g);color:var(--g)}"
+    "h1{flex:1;min-width:0;margin:0;font-size:18px;font-weight:400;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
+    ".stage{position:relative;display:grid;place-items:center;min-height:60vh}"
+    ".stage img,.stage video{max-width:100%;max-height:78vh;display:block}"
+    ".stage audio{width:min(92%,520px)}"
+    ".arrow{position:absolute;top:50%;translate:0 -50%;display:grid;place-items:center;width:48px;height:80px;"
+    "background:rgba(10,5,6,.7);color:var(--i);text-decoration:none;font-size:30px}"
+    ".arrow.l{left:0}.arrow.r{right:0}"
+    ".meta{padding:10px 14px 24px;color:var(--m)}"
+    ".note{margin:10px 14px;padding:10px 12px;border:2px solid var(--g);font:17px/1.4 Georgia,serif;color:var(--i)}"
+    "</style>"
+    "<title>{{ title }}</title>"
+    "<div class=top><a href=\"{{ folder }}\" aria-label=Back>&#8249; Back</a><h1>{{ title }}</h1>"
+    "<a class=dl href=\"{{ uri }}?download=1\" download>Download</a></div>"
+    "<div class=stage>"
+    "{% if kind == 'audio' %}<audio controls preload=metadata src=\"{{ uri }}\"></audio>"
+    "{% elif kind == 'video' %}<video controls preload=metadata src=\"{{ uri }}\"></video>"
+    "{% elif kind == 'image' %}<img src=\"{{ uri }}\" alt=\"{{ title }}\">{% endif %}"
+    "{% if prev_href %}<a class='arrow l' href=\"{{ prev_href }}\" aria-label=Previous>&#8249;</a>{% endif %}"
+    "{% if next_href %}<a class='arrow r' href=\"{{ next_href }}\" aria-label=Next>&#8250;</a>{% endif %}"
+    "</div>"
+    "<div class=meta>{{ size }}{% if when %} &middot; {{ when }}{% endif %}</div>"
+    "{% if heic %}<div class=note>HEIC is the iPhone's own photo format. Apple devices show it as is. "
+    "On other devices this page may stay blank: Download gives the original.</div>{% endif %}"
+)
+
+
 @app.get("/_files/view")
 def media_viewer():
     user = caller()
@@ -415,17 +529,29 @@ def media_viewer():
     except (ClientError, Unplaced):
         abort(404)
     kind = PLAYER_TYPES.get(meta.get("ContentType"))
-    return render_template_string(
-        "<!doctype html><html{% if scheme %} data-scheme=\"{{ scheme }}\"{% endif %}>"
-        "<meta charset=utf-8><meta name=viewport content='width=device-width'>"
-        "<meta name=color-scheme content='light dark'>"
-        "<style>:root[data-scheme=light]{color-scheme:light}:root[data-scheme=dark]{color-scheme:dark}</style>"
-        "<title>{{ title }}</title><h1>{{ title }}</h1>"
-        "{% if kind == 'audio' %}<audio controls preload=metadata src=\"{{ uri }}\"></audio>"
-        "{% elif kind == 'video' %}<video controls preload=metadata src=\"{{ uri }}\"></video>{% endif %}"
-        "<p><a href=\"{{ uri }}?download=1\" download>Download</a></p>",
-        title=key.rsplit("/", 1)[-1], uri=uri, kind=kind, scheme=reader_scheme(),
-    ), {"Vary": "Cookie"}
+    if kind is None and meta.get("ContentType") in ("application/octet-stream", "binary/octet-stream") \
+            and key.lower().endswith((".heic", ".heif")):
+        kind = "image"
+    prev_href = next_href = None
+    here = key.rsplit("/", 1)[0] + "/" if "/" in key else ""
+    if kind in ("image", "video") and ACL.allows(user, caller_groups(), here, "list"):
+        try:
+            _dirs, siblings, _t, _n = listing(bucket, here)
+            names = [f["name"] for f in sorted(
+                (f for f in siblings if kind_of(f["name"]) in ("image", "video")),
+                key=lambda f: (day_of(f["name"], f.get("dt")), f["name"].lower()), reverse=True)]
+            me = key[len(here):]
+            if me in names:
+                i = names.index(me)
+                link = lambda n: viewer_href(quote("/" + here + n, safe="/"))
+                prev_href = link(names[i - 1]) if i > 0 else None
+                next_href = link(names[i + 1]) if i + 1 < len(names) else None
+        except (ClientError, Unplaced):
+            pass
+    return render_template_string(VIEWER_PAGE, title=key.rsplit("/", 1)[-1], uri=uri, kind=kind, scheme=reader_scheme(),
+                                  folder="/" + here, prev_href=prev_href, next_href=next_href,
+                                  heic=key.lower().endswith((".heic", ".heif")),
+                                  size=human(meta.get("ContentLength", 0)), when=when(meta.get("LastModified"))), {"Vary": "Cookie"}
 
 
 @app.get("/_files/authz")

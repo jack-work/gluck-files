@@ -28,7 +28,9 @@ function monthLabel(m) {
 
 const doneKey = (month, b) => "saved:" + data.root + ":" + month + ":" + b.n + ":" + b.files.length + ":" + b.bytes;
 const isDone = (month, b) => localStorage.getItem(doneKey(month, b)) === "1";
-const zipHref = (month, b) => "/_save/api/zip?root=" + encodeURIComponent(data.root) + "&month=" + encodeURIComponent(month) + "&batch=" + b.n;
+const query = new URLSearchParams(location.search);
+const picks = query.getAll("pick");
+const zipHref = (month, b) => "/_save/api/zip?" + new URLSearchParams([["root", data.root], ["month", month], ["batch", b.n], ...picks.map((p) => ["pick", p])]).toString();
 
 function render() {
   const root = $("months");
@@ -50,7 +52,8 @@ function render() {
       const p = document.createElement("div");
       p.className = "part" + (isDone(m.month, b) ? " done" : "");
       p.innerHTML = '<div><div class="pname"></div><div class="pmeta"></div></div>';
-      p.querySelector(".pname").textContent = "Part " + b.n + " of " + m.batches.length + (b.kind === "videos" ? " · videos" : "");
+      p.querySelector(".pname").textContent = "Part " + b.n + " of " + m.batches.length;
+      if (b.kind === "videos") { const k = document.createElement("span"); k.className = "kind"; k.textContent = "VIDEOS"; p.querySelector(".pname").appendChild(k); }
       p.querySelector(".pmeta").textContent = plural(b.files.length, "file") + " · " + mb(b.bytes) + (isDone(m.month, b) ? " · sent to your phone" : "");
       let act;
       if (data.shareable) {
@@ -202,19 +205,29 @@ $("jobCancel").addEventListener("click", () => {
 
 (async () => {
   try {
-    const asked = new URLSearchParams(location.search).get("root");
-    const r = await fetch("/_save/api/list" + (asked === null ? "" : "?root=" + encodeURIComponent(asked)), { credentials: "same-origin" });
+    const lq = new URLSearchParams();
+    if (query.get("root") !== null) lq.set("root", query.get("root"));
+    for (const p of picks) lq.append("pick", p);
+    const r = await fetch("/_save/api/list?" + lq.toString(), { credentials: "same-origin" });
     const j = await r.json().catch(() => ({}));
     if (r.status === 401) { $("who").textContent = "signed out"; $("lede").textContent = "Sign in first, then open this page again."; return; }
     if (!r.ok) { $("lede").textContent = r.status === 404 ? "There is no photos folder for your account yet." : "Can't list your photos: " + (j.error || r.status); return; }
     data = j;
     data.shareable = sharing();
     $("who").textContent = j.user;
+    const folder = j.root.replace(/\/$/, "").split("/").filter(Boolean).pop();
+    $("title").textContent = picks.length ? "Save " + picks.length + " picked" : "To your iPhone";
+    $("back").textContent = "Back to " + (folder || "your files");
+    $("back").href = j.base;
     const total = j.months.reduce((n, m) => n + m.files, 0);
     const bytes = j.months.reduce((n, m) => n + m.bytes, 0);
     $("lede").textContent = total ? plural(total, "photo and video file") + ", " + mb(bytes) + ". " + (data.shareable ? "Save them back onto this phone." : "This browser can't save straight to Photos, so each part comes as a zip.") : "Nothing to save yet.";
     $("howto").hidden = !total;
     render();
+    const want = query.get("month");
+    const open = want && document.querySelector('details.month[data-month="' + want + '"]');
+    if (open) { open.open = true; open.scrollIntoView(); }
+    else if (j.months.length === 1) document.querySelector("details.month").open = true;
   } catch (e) {
     $("lede").textContent = "Can't reach the server: " + e.message;
   }
