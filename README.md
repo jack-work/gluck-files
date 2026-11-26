@@ -152,6 +152,8 @@ listings are computed per request; Garage itself has no autoindex. See
 
 See [`doc/ACL.md`](./doc/ACL.md) for the model and the admin CLI, and
 [`doc/LISTER.md`](./doc/LISTER.md) for how the bucket is resolved from `Host`.
+The explorer's tiles are small JPEG copies made at upload time and by a
+backfill; see [`doc/THUMBS.md`](./doc/THUMBS.md).
 
 ## Operating
 
