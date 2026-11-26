@@ -17,6 +17,8 @@
         cp ${./lister/upload.py} $out/upload.py
         cp ${./lister/save.py} $out/save.py
         cp ${./lister/place.py} $out/place.py
+        cp ${./lister/thumbs.py} $out/thumbs.py
+        cp ${./lister/thumbrender.py} $out/thumbrender.py
       '';
 
       # doc/LISTER.md
@@ -46,6 +48,8 @@
             waitress
             boto3
             markupsafe
+            pillow
+            pillow-heif
           ]);
 
           # The admin's only way to change an ACL. Authority is ssh to spain.
@@ -865,8 +869,8 @@
       checks = forAllSystems (system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
-          py = pkgs.python3.withPackages (ps: with ps; [ flask waitress boto3 markupsafe ]);
-          suite = name: file: pkgs.runCommand "gluck-files-${name}" { } ''
+          py = pkgs.python3.withPackages (ps: with ps; [ flask waitress boto3 markupsafe pillow pillow-heif ]);
+          suite = name: file: pkgs.runCommand "gluck-files-${name}" { nativeBuildInputs = [ pkgs.ffmpeg-headless ]; } ''
             # pipefail is load-bearing: without it the pipeline reports tee's
             # exit status and a failing test builds green.
             set -o pipefail
@@ -884,6 +888,7 @@
           media-authz = suite "media-authz" "test_media_authz.py";
           viewer = suite "viewer" "test_viewer.py";
           bucket-for = suite "bucket-for" "test_lister.py";
+          thumbs = suite "thumbs" "test_thumbs.py";
           scheme = (suite "scheme" "test_scheme.py").overrideAttrs { LISTER_TEMPLATE_BUILT = listerTemplateFor pkgs; };
 
           socket = pkgs.runCommand "gluck-files-socket" { } ''
@@ -971,7 +976,7 @@
           packaging = pkgs.runCommand "gluck-files-packaging" { } ''
             set -o pipefail
             SRC=${listerSrcFor pkgs}
-            for m in acl.py lister.py aclctl.py; do
+            for m in acl.py lister.py aclctl.py thumbs.py thumbrender.py; do
               test -f "$SRC/$m" || { echo "MISSING from shipped tree: $m"; exit 1; }
             done
             if ls "$SRC" | grep -q '^test_'; then
@@ -982,8 +987,10 @@
             AWS_ACCESS_KEY_ID=t AWS_SECRET_ACCESS_KEY=t AWS_EC2_METADATA_DISABLED=true \
             ${py}/bin/python3 -c "
 import sys; sys.path.insert(0, '$SRC')
-import lister, acl, aclctl
-print('gateway, acl and the admin CLI all import from the shipped tree')
+import lister, acl, aclctl, thumbs
+assert thumbs.can('image'), 'Pillow is missing from the shipped python'
+import os; assert os.path.exists(thumbs.RENDERER), 'renderer is missing from the shipped tree'
+print('gateway, acl, the admin CLI and the thumbnail tools all import from the shipped tree')
 " 2>&1 | tee $out
           '';
         });
