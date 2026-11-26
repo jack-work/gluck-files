@@ -153,7 +153,7 @@ await test("provino listing: date-headed tiles, no script allowed, links to the 
   assert.match(csp, /form-action 'none'/);
   assert.equal(await page.$$eval("script", (e) => e.length), 0);
   const heads = await page.$$eval(".p-day span:first-child", (e) => e.map((x) => x.textContent));
-  assert.ok(heads.length >= 3 && heads.every((h) => /\d{4}$/.test(h)), heads.join("|"));
+  assert.ok(heads.length >= 3 && heads.every((h) => /\d{4}$|^No date/.test(h)), heads.join("|"));
   assert.ok((await page.$$eval(".p-tile", (e) => e.length)) >= 50);
   assert.equal(await page.$$eval(".p-tile img[alt^='.']", (e) => e.length), 0, "hidden files are not shown");
   assert.equal(await page.getAttribute(".p-actions a.p-btn:not(.ghost)", "href"), "/_save/?root=photos%2FDCIM%2FCamera%2F");
@@ -186,13 +186,13 @@ await test("select view: tiles toggle by link, then only the picked files are sa
   assert.equal(await page.$$eval("form", (e) => e.length), 0, "no form, so form-action 'none' is fine");
   for (let i = 0; i < 3; i++) await page.click(".p-tile:not(.picked) > a >> nth=" + i);
   assert.equal(await page.$$eval(".p-tile.picked", (e) => e.length), 3);
-  const names = await page.$$eval(".p-tile.picked img", (e) => e.map((x) => x.alt).sort());
+  const names = await page.$$eval(".p-tile.picked a", (e) => e.map((a) => (a.querySelector("img") ? a.querySelector("img").alt : a.querySelector(".glyph span").textContent)));
   await page.click("text=Save 3 to iPhone");
   await page.waitForSelector("details.month");
   assert.equal(await page.textContent("#title"), "Save 3 picked");
   const shown = await page.$$eval("details.month .mmeta", (e) => e.map((x) => x.textContent).join(" "));
   assert.match(shown, /\b[123] files?\b/);
-  await page.click("details.month > summary >> nth=0");
+  await page.evaluate(() => document.querySelectorAll("details.month").forEach((d) => (d.open = true)));
   await page.click("details.month .part button >> nth=0");
   await page.waitForSelector("#jobSave:not([hidden])", { timeout: 20000 });
   await page.click("#jobSave");

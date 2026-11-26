@@ -19,6 +19,7 @@ Admin is not a special case in code: `group:files-admin` holds read/list/write
 on the root, which inherits everywhere. One mechanism, one code path.
 """
 
+import base64
 import json
 import logging
 import os
@@ -40,7 +41,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from acl import Acl, BadPath, canonical_object_uri, media_request, normalise
 from caption_gate import CaptionGate, ManifestUnavailable
 from place import Places, Unplaced
-from save import day_of, kind_of
+from save import UNDATED, day_of, kind_of
 from urllib.parse import urlencode
 
 BUCKETS = frozenset(
@@ -230,7 +231,7 @@ def parent_of(prefix):
     return "/" + "".join(p + "/" for p in parts[:-1])
 
 
-def listing(bucket, prefix):
+def listing(bucket, prefix, max_keys=None):
     dirs, files, truncated, token = [], [], False, None
     try:
         client, where, inner = PLACES.at(bucket, prefix)
@@ -264,7 +265,7 @@ def listing(bucket, prefix):
                 }
             )
 
-        if len(dirs) + len(files) >= MAX_KEYS:
+        if len(dirs) + len(files) >= (max_keys or MAX_KEYS):
             truncated = True
             break
         if not page.get("IsTruncated"):
@@ -335,36 +336,87 @@ def day_label(day):
     return f"{DAY_NAMES[d.weekday()]} {d.day} {MONTH_NAMES[d.month - 1]} {d.year}"
 
 
-def provino(files, home_rel, prefix, select, picks):
-    """Group a folder's files into dated tiles, with plain-link select state."""
+GRID_MAX = 20000
+PAGE_DEFAULT = 200
+PAGE_MAX = 500
+THUMB_EDGE = 320
+NODAY = "0000-00-00"
+
+
+def thumbs_for(client, where, inner, mine):
+    """name -> etag for the small copies that exist beside this folder's files."""
+    if not mine:
+        return {}
+    found, token = {}, None
+    base = ".thumbs/" + inner
+    while True:
+        kw = {"Bucket": where, "Prefix": base, "Delimiter": "/", "MaxKeys": 1000}
+        if token:
+            kw["ContinuationToken"] = token
+        try:
+            page = client.list_objects_v2(**kw)
+        except ClientError:
+            return {}
+        for o in page.get("Contents", []):
+            n = o["Key"][len(base):]
+            if n.endswith(".jpg") and o.get("Size", 0) > 0:
+                found[n[:-4]] = (o.get("ETag") or "").strip('"')
+        if not page.get("IsTruncated"):
+            return found
+        token = page.get("NextContinuationToken")
+        if not token:
+            return found
+
+
+def provino(files, prefix, select, picks, thumbs, home, limit, after, query):
+    """Sort a folder date-descending then by name, cut one page after the cursor,
+    and group it into dated runs. All state lives in the query, so it is links."""
     here = "/" + prefix
-    media, other = [], []
     files = [f for f in files if not f["name"].startswith(".")]
     for f in files:
         f["kind"] = kind_of(f["name"])
-        f["day"] = day_of(f["name"], f.get("dt"))
+        f["day"] = day_of(f["name"], None)
+        if f["day"] == UNDATED:
+            f["day"] = NODAY
         f["heic"] = f["name"].lower().endswith((".heic", ".heif"))
         f["picked"] = f["name"] in picks
-        (media if f["kind"] in ("image", "video") else other).append(f)
-    days = {}
-    for f in media:
-        days.setdefault(f["day"], []).append(f)
-    out = []
-    for day in sorted(days, reverse=True):
-        items = sorted(days[day], key=lambda f: f["name"].lower())
-        out.append({"day": day, "label": day_label(day), "month": day[:7], "files": items})
+        tag = thumbs.get(f["name"])
+        f["thumb"] = bool(tag) and f["kind"] in ("image", "video")
+        if f["thumb"]:
+            f["thumb_url"] = "/_thumb/" + home + prefix[len(home):] + quote(f["name"], safe="/") + "?v=" + quote(tag, safe="")
+            f["thumb_w"] = f["thumb_h"] = THUMB_EDGE
+    ordered = sorted(files, key=lambda f: f["name"], reverse=True)
+    ordered = sorted(ordered, key=lambda f: f["day"] == NODAY)
+    media = [f for f in ordered if f["kind"] in ("image", "video")]
+    other = [f for f in ordered if f["kind"] not in ("image", "video")]
+    total = len(media) + len(other)
+    cur = after or None
+    if cur:
+        sk = lambda n: (day_of(n, None) == UNDATED, [-ord(c) for c in n])
+        media = [f for f in media if sk(f["name"]) > sk(cur)]
+    page, rest = media[:limit], media[limit:]
+    runs = []
+    for f in page:
+        if not runs or runs[-1]["day"] != f["day"]:
+            runs.append({"day": f["day"], "label": day_label(f["day"]), "month": f["day"][:7], "files": [],
+                         "cont": bool(cur and not runs and f["name"] and day_of(cur, None) == (f["day"] if f["day"] != NODAY else UNDATED))})
+        runs[-1]["files"].append(f)
+    nxt = None
+    if rest:
+        last = page[-1]
+        nxt = here + "?" + urlencode(query + [("after", last["name"])])
     if select:
         for f in media:
-            nxt = [n for n in sorted(picks) if n != f["name"]] if f["picked"] else sorted(picks | {f["name"]})
-            f["toggle"] = here + "?" + urlencode([("select", "1")] + [("pick", n) for n in nxt[:PICK_CAP]])
-    return out, other, len(media)
+            keep = [n for n in sorted(picks) if n != f["name"]] if f["picked"] else sorted(picks | {f["name"]})
+            f["toggle"] = here + "?" + urlencode(query + ([("after", after)] if after else []) + [("select", "1")] + [("pick", n) for n in keep[:PICK_CAP]])
+    return runs, (other if not cur else []), len(page), total, nxt, bool(cur)
 
 
 def render(bucket, prefix, user, groups):
     may_list = ACL.allows(user, groups, prefix, "list")
 
     if may_list:
-        dirs, files, truncated, shown = listing(bucket, prefix)
+        dirs, files, truncated, shown = listing(bucket, prefix, GRID_MAX)
     else:
         subs = granted_subtrees(user, groups, prefix)
         if not subs:
@@ -378,7 +430,27 @@ def render(bucket, prefix, user, groups):
     select = mine and request.args.get("select") == "1"
     picks = set(request.args.getlist("pick")[:PICK_CAP]) if select else set()
 
-    days, other, nmedia = provino(files, home_rel, prefix, select, picks)
+    try:
+        limit = max(1, min(PAGE_MAX, int(request.args.get("limit", PAGE_DEFAULT))))
+    except ValueError:
+        limit = PAGE_DEFAULT
+    after = request.args.get("after") or ""
+    query = [("order", "desc")]
+    if request.args.get("limit"):
+        query.append(("limit", str(limit)))
+    thumbs = {}
+    if mine and may_list and files:
+        try:
+            client, where, inner = PLACES.at(bucket, prefix)
+            thumbs = thumbs_for(client, where, inner, True)
+        except (Unplaced, ClientError):
+            thumbs = {}
+    dirs = [d for d in dirs if not d["name"].startswith(".")]
+    days, other, shown_media, total_files, next_href, continued = provino(
+        files, prefix, select, picks, thumbs, home, limit, after, query)
+    nmedia = sum(1 for f in files if kind_of(f["name"]) in ("image", "video") and not f["name"].startswith("."))
+    if continued:
+        dirs = []
     total = sum(f["bytes"] for f in files)
     bits = []
     if dirs:
@@ -430,6 +502,12 @@ def render(bucket, prefix, user, groups):
         done_href=here,
         clear_href=here + "?select=1",
         pick_cap=PICK_CAP,
+        next_href=next_href,
+        next_n=limit,
+        shown_n=shown_media,
+        total_n=total_files,
+        first_href=here,
+        continued=continued,
     )
 
 
@@ -671,7 +749,7 @@ def serve(path):
 
     if not is_dir:
         abort(404)
-    return render(bucket, key, user, groups), {"Vary": "Cookie"}
+    return render(bucket, key, user, groups), {"Vary": "Cookie", "Cache-Control": "no-cache"}
 
 
 @app.errorhandler(401)

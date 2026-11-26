@@ -43,7 +43,7 @@ class FakeBucket:
         window = entries[start:start + self.page]
         more = start + self.page < len(entries)
         return {
-            "Contents": [{"Key": k, "Size": len(self.objects[k]),
+            "Contents": [{"Key": k, "Size": len(self.objects[k]), "ETag": '"' + hashlib.md5(self.objects[k]).hexdigest()[:12] + '"',
                           "LastModified": datetime(2026, 11, 26, 1, 30, tzinfo=timezone.utc)} for t, k in window if t == "k"],
             "CommonPrefixes": [{"Prefix": k} for t, k in window if t == "p"],
             "IsTruncated": more,

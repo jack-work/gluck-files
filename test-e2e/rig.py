@@ -48,7 +48,14 @@ from waitress import serve  # noqa: E402
 
 save.BATCH_BYTES = 6 * 1024 * 1024
 OBJECTS = invented()
-BUCKET = FakeBucket(OBJECTS)
+SEED = os.environ.get("CAMERA_SEED")
+if SEED:
+    for dirpath, _d, names in os.walk(SEED):
+        for n in names:
+            full = os.path.join(dirpath, n)
+            OBJECTS[os.path.relpath(full, SEED)] = open(full, "rb").read()
+BUCKET = FakeBucket(OBJECTS, page=1000)
+HITS = {"thumb": 0, "thumb_pending": 0, "original": 0}
 
 
 def at(bucket, key, ensure=False):
@@ -74,21 +81,40 @@ LISTING_POLICY = re.search(r'"Content-Security-Policy" = "([^"]+)"', open(os.pat
 edge = Flask(__name__)
 
 
-@edge.get("/users/pilar/photos/<path:rel>")
+@edge.get("/users/pilar/<path:rel>")
 def obj(rel):
     if request.headers.get("Remote-User") != "pilar":
         return Response("denied", status=403)
-    data = OBJECTS.get("photos/" + rel)
+    data = OBJECTS.get(rel)
     if data is None:
         return Response("", status=404)
-    ctype = "image/jpeg" if rel.lower().endswith("jpg") else "video/mp4" if rel.endswith("mp4") else "application/octet-stream"
+    HITS["original"] += 1
+    low = rel.lower()
+    ctype = "image/jpeg" if low.endswith(("jpg", "jpeg")) else "image/heic" if low.endswith("heic") else "video/mp4" if low.endswith("mp4") else "application/octet-stream"
     return Response(data, mimetype=ctype, headers={"Cache-Control": "private, no-store"})
+
+
+@edge.get("/_thumb/users/pilar/<path:rel>")
+def thumb(rel):
+    if request.headers.get("Remote-User") != "pilar":
+        return Response("denied", status=403)
+    data = OBJECTS.get(".thumbs/" + rel + ".jpg")
+    if data is None:
+        HITS["thumb_pending"] += 1
+        return Response("", status=404, headers={"X-Thumb": "pending"})
+    HITS["thumb"] += 1
+    return Response(data, mimetype="image/jpeg", headers={"Cache-Control": "private, max-age=31536000, immutable"})
+
+
+@edge.get("/_rig/hits")
+def hits():
+    return HITS
 
 
 @edge.get("/_rig/objects")
 def listing_of_objects():
     import hashlib
-    return {k[len("photos/"):]: hashlib.sha256(v).hexdigest() for k, v in OBJECTS.items()}
+    return {k[len("photos/"):]: hashlib.sha256(v).hexdigest() for k, v in OBJECTS.items() if k.startswith("photos/")}
 
 
 @lister.app.after_request
@@ -112,7 +138,7 @@ def wsgi(environ, start):
     path = environ["PATH_INFO"]
     if path.startswith(("/_save/", "/_upload/")):
         app = upload.app
-    elif path.startswith("/_rig/") or (path.startswith("/users/") and not path.endswith("/")):
+    elif path.startswith(("/_rig/", "/_thumb/")) or (path.startswith("/users/") and not path.endswith("/")):
         app = edge
     else:
         app = lister.app
