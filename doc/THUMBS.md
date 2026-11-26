@@ -6,7 +6,9 @@ description: The small JPEG copies the files explorer shows as tiles, where they
 # Thumbnails
 
 The explorer lists a folder and shows `/_thumb/users/<u>/<rel>?v=<etag>` for
-each photo or video. The lister never sees the original for a tile.
+each photo or video. The lister never sees the original for a tile. Tiles
+appear in any home the caller may list: their own, or one an explicit row names
+them in.
 
 ## Where a thumb lives
 

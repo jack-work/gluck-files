@@ -345,10 +345,8 @@ THUMB_EDGE = 320
 NODAY = "0000-00-00"
 
 
-def thumbs_for(client, where, inner, mine):
+def thumbs_for(client, where, inner):
     """name -> etag for the small copies that exist beside this folder's files."""
-    if not mine:
-        return {}
     found, token = {}, None
     base = ".thumbs/" + inner
     while True:
@@ -428,6 +426,8 @@ def render(bucket, prefix, user, groups):
 
     home = "users/" + user + "/"
     mine = prefix.startswith(home)
+    shelf_owner = home_owner(prefix)
+    shelf = f"users/{shelf_owner}/" if shelf_owner else ""
     home_rel = prefix[len(home):] if mine else None
     select = mine and request.args.get("select") == "1"
     picks = set(request.args.getlist("pick")[:PICK_CAP]) if select else set()
@@ -441,15 +441,15 @@ def render(bucket, prefix, user, groups):
     if request.args.get("limit"):
         query.append(("limit", str(limit)))
     thumbs = {}
-    if mine and may_list and files:
+    if shelf and may_list and files:
         try:
             client, where, inner = PLACES.at(bucket, prefix)
-            thumbs = thumbs_for(client, where, inner, True)
+            thumbs = thumbs_for(client, where, inner)
         except (Unplaced, ClientError):
             thumbs = {}
     dirs = [d for d in dirs if not d["name"].startswith(".")]
     days, other, shown_media, total_files, next_href, continued = provino(
-        files, prefix, select, picks, thumbs, home, limit, after, query)
+        files, prefix, select, picks, thumbs, shelf, limit, after, query)
     nmedia = sum(1 for f in files if kind_of(f["name"]) in ("image", "video") and not f["name"].startswith("."))
     if continued:
         dirs = []

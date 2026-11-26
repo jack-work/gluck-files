@@ -242,6 +242,60 @@ class Granted(Base):
         self.assertEqual(self.shape(r), self.shape(self.get("/_thumb/users/nobody/camera/x.jpg", user="admin")))
 
 
+class Listing(Base):
+    TILES = (
+        "{% for d in days %}{% for f in d.files %}[{{ f.thumb_url }}]{% endfor %}{% endfor %}"
+        "|{{ heading }}|mine={{ mine }}|{{ upload_href }}|{{ save_href }}|{{ select_href }}"
+    )
+
+    def setUp(self):
+        super().setUp()
+        self.template = L.PAGE_TEMPLATE
+        L.PAGE_TEMPLATE = L.app.jinja_env.from_string(self.TILES)
+        self.bucket.objects["users/pilar/camera/20240512_101010.jpg"] = b"original"
+        L.ACL.grant("user:pilar", "users/pilar/", "write", "fixture")
+
+    def tearDown(self):
+        L.PAGE_TEMPLATE = self.template
+        super().tearDown()
+
+    def page(self, user, groups=""):
+        return self.get("/users/pilar/camera/", user=user, groups=groups)
+
+    def test_the_owner_sees_tiles_and_the_home_chrome(self):
+        body = self.page("pilar").get_data(as_text=True)
+        self.assertIn("[/_thumb/users/pilar/camera/20240512_101010.jpg?v=", body)
+        self.assertIn("mine=True", body)
+        self.assertIn("/_save/", body)
+
+    def test_a_named_user_sees_the_same_tiles_and_none_of_the_owners_chrome(self):
+        L.ACL.grant("user:admin", "users/pilar/", "read", "fixture")
+        L.ACL.grant("user:admin", "users/pilar/", "list", "fixture")
+        r = self.page("admin", "files-admin")
+        self.assertEqual(r.status_code, 200)
+        body = r.get_data(as_text=True)
+        self.assertIn("[/_thumb/users/pilar/camera/20240512_101010.jpg?v=", body)
+        self.assertIn("mine=False", body)
+        self.assertIn("|camera|", body)
+        self.assertNotIn("/_save/", body)
+        self.assertNotIn("select=1", body)
+        self.assertNotIn("Your files", body)
+
+    def test_an_ungranted_user_and_a_group_member_get_a_404(self):
+        for user, groups in (("stranger", ""), ("admin", "files-admin"), ("stranger", "files-admin,pilar,admin")):
+            r = self.page(user, groups)
+            self.assertEqual(r.status_code, 404, (user, groups))
+            self.assertNotIn(b"_thumb", r.data)
+
+    def test_the_named_user_reaches_the_home_through_users_without_seeing_the_others(self):
+        L.ACL.grant("user:admin", "users/pilar/", "list", "fixture")
+        L.ACL.grant("user:other", "users/other/", "list", "fixture")
+        self.assertFalse(L.ACL.allows("admin", ["files-admin"], "users/", "list"))
+        self.assertEqual(L.granted_subtrees("admin", ["files-admin"], "users/"), ["pilar/"])
+        self.assertEqual(self.get("/users/", user="admin", groups="files-admin").status_code, 200)
+        self.assertEqual(self.get("/users/", user="stranger", groups="files-admin").status_code, 404)
+
+
 class Pressure(Base):
     def setUp(self):
         super().setUp()

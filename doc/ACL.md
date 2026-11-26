@@ -129,7 +129,9 @@ so the admin case is exercised by exactly the checks everyone else gets.
 
 The gateway serves a home's bytes with the owner's Garage key whoever is
 asking (`place.py` picks the key from the path, not from the caller), so a
-named user needs no key of their own.
+named user needs no key of their own. Whoever may list a home sees its
+thumbnails; the own-home extras (the "Your files" heading, upload, save, pick)
+stay on the caller's own home.
 
 `write` on another's home is recorded and answered by `allows` and `check`.
 The upload and save pages address only the caller's own home, so no route
