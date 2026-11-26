@@ -47,12 +47,47 @@ USERS = {
     "cal": FakeBucket(tree("", ["uploads/20250101_000000.jpg", "docs/20250202_000000.pdf"])),
     "dee": FakeBucket({**tree("photos/all/", ALL), **tree("photos/keep/", KEEP),
                        ".save.json": b'{"root": "photos/all/"}'}),
+    "fay": FakeBucket({**tree("photos/keep/", KEEP)}),
     "eli": FakeBucket({**tree("photos/all/", ALL), **tree("photos/keep/", KEEP), "photos/manifest.tsv": DATED}),
 }
 upload.PLACES.at = lambda bucket, key, ensure=False: (USERS[key.split("/")[1]], "u-" + key.split("/")[1], key.split("/", 2)[2])
 for who in USERS:
     upload.ACL.grant(f"user:{who}", f"users/{who}/", "read", "test")
     upload.ACL.grant(f"user:{who}", f"users/{who}/", "list", "test")
+
+
+class Endless:
+    def __init__(self):
+        self.read = 0
+
+    def iter_chunks(self, n):
+        while True:
+            self.read += n
+            yield b"x" * n
+
+    def close(self):
+        self.closed = True
+
+
+class Reading(unittest.TestCase):
+    def test_an_oversized_settings_or_manifest_object_is_abandoned_at_the_limit(self):
+        for key, limit in ((".save.json", 4096), ("photos/manifest.tsv", 8 * 1024 * 1024)):
+            body = Endless()
+            bucket = USERS["fay"]
+            real = bucket.get_object
+
+            def get(Bucket, Key, _k=key, _b=body, _real=real, **kw):
+                return {"Body": _b, "ETag": "e"} if Key == _k else _real(Bucket=Bucket, Key=Key, **kw)
+
+            bucket.get_object = get
+            try:
+                c = upload.app.test_client()
+                r = c.get("/_save/api/list", headers={"Remote-User": "fay"})
+                self.assertEqual(r.status_code, 200, key)
+                self.assertLessEqual(body.read, limit + save.CHUNK, key)
+                self.assertTrue(body.closed, key)
+            finally:
+                bucket.get_object = real
 
 
 class Months(unittest.TestCase):

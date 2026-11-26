@@ -176,11 +176,19 @@ def register(app, *, place, caller, acl, page_dir, refuse, ok, log):
             r = client.get_object(Bucket=bucket, Key=inner)
             etag = r.get("ETag")
             body = r["Body"]
-            data = b"".join(body.iter_chunks(CHUNK))
-            body.close()
+            parts, got = [], 0
+            try:
+                for chunk in body.iter_chunks(min(CHUNK, limit + 1)):
+                    parts.append(chunk)
+                    got += len(chunk)
+                    if got > limit:
+                        return None, None
+            finally:
+                body.close()
+            data = b"".join(parts)
         except (ClientError, Unplaced, KeyError):
             return None, None
-        return (data[:limit] if data else None), etag
+        return (data or None), etag
 
     def settings_root(user):
         data, _ = read_object(user, SETTINGS, 4096)
