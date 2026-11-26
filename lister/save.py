@@ -8,7 +8,7 @@ from collections import deque
 from datetime import datetime, timezone
 
 from botocore.exceptions import ClientError
-from flask import Response, request
+from flask import Response, g, request
 
 from acl import BadPath, normalise
 from place import Unplaced
@@ -249,6 +249,9 @@ def register(app, *, place, caller, acl, page_dir, refuse, ok, log):
                     continue
                 if any(p.startswith(".") for p in rel.split("/")):
                     continue
+                if not obj.get("Size", 0):
+                    g.setdefault("empties", []).append({"rel": rel, "modified": obj.get("LastModified")})
+                    continue
                 files.append({"rel": rel, "size": obj.get("Size", 0), "modified": obj.get("LastModified")})
             if len(files) >= MAX_LISTED or not page.get("IsTruncated"):
                 break
@@ -286,18 +289,20 @@ def register(app, *, place, caller, acl, page_dir, refuse, ok, log):
         if files is None:
             return refuse(404, "nothing to save here")
         out = []
-        grouped = by_month(files, months_for(user, root))
+        manifest = months_for(user, root)
+        grouped = by_month(files, manifest)
         order = sorted((m for m in grouped if m != UNDATED), reverse=True) + ([UNDATED] if UNDATED in grouped else [])
         for month in order:
             group = grouped[month]
             bs = batches_of(group)
             out.append({
+                "empty": sum(1 for e in g.get("empties", []) if month_of(e["rel"], e["modified"], manifest) == month),
                 "month": month, "files": len(group), "bytes": sum(f["size"] for f in group),
                 "batches": [{"n": i + 1, "kind": "videos" if is_video(b[0]["rel"]) else "photos", "files": [{"rel": f["rel"], "size": f["size"]} for f in b],
                              "bytes": sum(f["size"] for f in b)} for i, b in enumerate(bs)],
             })
         return ok({"user": user, "root": root, "base": f"/users/{user}/{root}",
-                   "batchFiles": BATCH_FILES, "batchBytes": BATCH_BYTES, "months": out,
+                   "empty": len(g.get("empties", [])), "batchFiles": BATCH_FILES, "batchBytes": BATCH_BYTES, "months": out,
                    "truncated": len(files) >= MAX_LISTED})
 
     @app.get("/_save/api/zip")

@@ -42,7 +42,7 @@ function render() {
     s.innerHTML = '<span class="mname"></span><span class="mdone"></span><span class="mmeta"></span>';
     s.querySelector(".mname").textContent = monthLabel(m.month);
     s.querySelector(".mdone").textContent = done === m.batches.length ? "All saved" : done ? done + " of " + m.batches.length + " saved" : "";
-    s.querySelector(".mmeta").textContent = plural(m.files, "file") + " · " + mb(m.bytes) + " · " + plural(m.batches.length, "part");
+    s.querySelector(".mmeta").textContent = plural(m.files, "file") + " · " + mb(m.bytes) + " · " + plural(m.batches.length, "part") + (m.empty ? " · " + plural(m.empty, "empty file") + " skipped" : "");
     d.appendChild(s);
     const parts = document.createElement("div");
     parts.className = "parts";
