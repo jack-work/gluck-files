@@ -250,6 +250,21 @@ class Api(unittest.TestCase):
         v = self.get("/_save/api/zip?month=2024-03&batch=2", user="bea")
         self.assertEqual(zipfile.ZipFile(io.BytesIO(v.data)).namelist(), ["DCIM/Camera/20240303_100000.mp4"])
 
+    def test_an_empty_object_is_skipped_and_counted(self):
+        bucket = USERS["bea"]
+        bucket.objects["photos/keep/DCIM/Camera/20240304_000000.jpg"] = b""
+        try:
+            j = self.get("/_save/api/list", user="bea").get_json()
+            mar = next(m for m in j["months"] if m["month"] == "2024-03")
+            self.assertEqual(mar["empty"], 1)
+            self.assertEqual(j["empty"], 1)
+            rels = [f["rel"] for b in mar["batches"] for f in b["files"]]
+            self.assertNotIn("DCIM/Camera/20240304_000000.jpg", rels)
+            r = self.get("/_save/api/zip?month=2024-03&batch=1", user="bea")
+            self.assertNotIn("DCIM/Camera/20240304_000000.jpg", zipfile.ZipFile(io.BytesIO(r.data)).namelist())
+        finally:
+            del bucket.objects["photos/keep/DCIM/Camera/20240304_000000.jpg"]
+
     def test_a_climbing_root_is_refused(self):
         self.assertEqual(self.get("/_save/api/list?root=../dad/").status_code, 400)
 
