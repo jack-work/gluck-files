@@ -179,8 +179,8 @@ class Acl:
         path = normalise(path)
         if path == "users/" or path.startswith("users/"):
             owner = path.split("/")[1] if path.count("/") >= 2 else ""
-            if not owner or subject != f"user:{owner}":
-                raise ValueError("users/<name>/ is reserved: only user:<name> may hold a grant there")
+            if not owner or not subject.startswith("user:"):
+                raise ValueError("users/<name>/ is reserved: only a user:<name> subject may hold a grant there")
         now = int(now if now is not None else time.time())
         with self._lock:
             self._db.execute(
@@ -242,9 +242,9 @@ class Acl:
             return False
         if prefixes[-1].startswith("users/"):
             owner = prefixes[-1].split("/")[1] if prefixes[-1].count("/") >= 2 else ""
-            if not owner or user != owner:
+            if not owner or not user:
                 return False
-            subs = [f"user:{owner}"]
+            subs = [f"user:{user}"]
             prefixes = [p for p in prefixes if p.startswith(f"users/{owner}/")]
         qs = ",".join("?" * len(subs))
         ps = ",".join("?" * len(prefixes))

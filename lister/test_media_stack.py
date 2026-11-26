@@ -685,6 +685,40 @@ api_bind_addr = "127.0.0.1:28393"
         self.assertEqual(status, 403)
         self.assertEqual(h['cache-control'], 'private, no-store')
 
+    def test_28_a_row_naming_another_user_opens_that_home_and_a_root_or_group_grant_does_not(self):
+        jpeg = b'\xff\xd8\xff\xe0THUMBNAIL\xff\xd9'
+        self.s3.put_object(Bucket='files', Key='users/bob/camera/b.jpg', Body=b'BOB_PHOTO', ContentType='image/jpeg')
+        self.s3.put_object(Bucket='files', Key='.thumbs/users/bob/camera/b.jpg.jpg', Body=jpeg, ContentType='image/jpeg')
+        for perm in ('read', 'list'):
+            self.L.ACL.grant('user:bob', 'users/bob/', perm, 'fixture')
+            self.L.ACL.grant('group:files-admin', '', perm, 'fixture')
+        try:
+            for path in ('/users/bob/camera/b.jpg', '/_thumb/users/bob/camera/b.jpg'):
+                for user in ('alice', 'admin'):
+                    status, h, body = self.get(path, user=user)
+                    self.assertGreaterEqual(status, 400, (path, user))
+                    self.assertNotIn(b'BOB_PHOTO', body)
+                    self.assertNotIn(jpeg, body)
+            self.assertEqual(self.get('/users/bob/camera/', user='alice')[0], 404)
+            for perm in ('read', 'list'):
+                self.L.ACL.grant('user:alice', 'users/bob/', perm, 'fixture')
+            status, h, body = self.get('/users/bob/camera/b.jpg', user='alice')
+            self.assertEqual((status, body), (200, b'BOB_PHOTO'))
+            status, h, body = self.get('/_thumb/users/bob/camera/b.jpg', user='alice')
+            self.assertEqual((status, body), (200, jpeg))
+            self.assertEqual(h['content-type'], 'image/jpeg')
+            self.assertEqual(self.get('/users/bob/camera/', user='alice')[0], 200)
+            self.assertGreaterEqual(self.get('/users/bob/camera/b.jpg', user='admin')[0], 400)
+            self.assertEqual(self.get('/users/bob/camera/', user='admin')[0], 404)
+            self.L.ACL.revoke('user:alice', 'users/bob/')
+            self.assertGreaterEqual(self.get('/users/bob/camera/b.jpg', user='alice')[0], 400)
+            self.assertEqual(self.get('/_thumb/users/bob/camera/b.jpg', user='alice')[0], 404)
+        finally:
+            self.L.ACL.revoke('user:bob', 'users/bob/')
+            self.L.ACL.revoke('group:files-admin', '')
+            for path in ('users/bob/camera/b.jpg', '.thumbs/users/bob/camera/b.jpg.jpg'):
+                self.s3.delete_object(Bucket='files', Key=path)
+
     def test_98_first_auth_transport_error_has_policy(self):
         self.auth.shutdown()
         self.auth.server_close()

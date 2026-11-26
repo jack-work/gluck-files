@@ -77,8 +77,9 @@ loopback URL, not downloaded.
 ## GET /_thumb/users/<owner>/<rel>
 
 Same origin, authenticated by the edge. Allowed when the ACL grants `read` on
-`users/<owner>/<rel>` (for `users/` that is the owner and nobody else) and the
-bearer client's prefix scope, if any, covers it.
+`users/<owner>/<rel>` (under `users/` that is the owner, and any user with an
+explicit row on that home, never a group or the root grant) and the bearer
+client's prefix scope, if any, covers it.
 
 | case | answer |
 | --- | --- |
@@ -86,7 +87,7 @@ bearer client's prefix scope, if any, covers it.
 | allowed, no thumb, marker, or not a JPEG | 404, `X-Thumb: pending`, `no-store` |
 | anything else | 404, plain, `no-store`, no `X-Thumb` |
 
-"Anything else" is not the owner, no such user, outside `users/`, a hidden or
+"Anything else" is not the owner or a named user, no such user, outside `users/`, a hidden or
 malformed path, an unknown host. All of them are the same bytes and are sent
 before the bucket is touched, so the route says nothing about which users or
 originals exist. No Remote-User is 401.

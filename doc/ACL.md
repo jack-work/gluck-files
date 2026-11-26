@@ -112,6 +112,29 @@ by hand. Resolving it first and checking second is how a path check gets bypasse
 database is created. There is no `if user is admin` anywhere in the request path,
 so the admin case is exercised by exactly the checks everyone else gets.
 
+### A home is owner-only, and opens to another named user by explicit row
+
+`users/<name>/` is one person's home. Three rules, in code in `acl.py`:
+
+- Only rows whose subject is the caller's own `user:<name>` count under
+  `users/<owner>/`. `group:` rows never do, `group:files-admin` included, and a
+  `group:` subject is refused by `grant` there.
+- A root grant, or any row above `users/<owner>/`, stops at `users/`. Nothing
+  is inherited from outside the home, and `users/` itself lists for nobody.
+- The owner holds `user:<owner>` on `users/<owner>/`. Anyone else gets in only
+  by a row naming them (`user:<other>`) on `users/<owner>/` or a folder inside
+  it, read, list and write each their own row. That row opens that home and
+  nothing else: not the grantee's own home (which needs its own owner row), not
+  a sibling such as `users/<owner>2/`, not `users/`.
+
+The gateway serves a home's bytes with the owner's Garage key whoever is
+asking (`place.py` picks the key from the path, not from the caller), so a
+named user needs no key of their own.
+
+`write` on another's home is recorded and answered by `allows` and `check`.
+The upload and save pages address only the caller's own home, so no route
+writes into someone else's today.
+
 ### A caller sees their own subtrees at the root
 
 Without `list` on `/`, a caller who holds grants beneath it gets a listing of
@@ -153,6 +176,7 @@ self-service: the admin brokers every share.
 
 ```bash
 ssh spain@spain 'sudo gluck-files-acl grant dad dad/ --read --list'
+ssh spain@spain 'sudo gluck-files-acl grant admin users/ctkelliher/ --read --list --write'
 ssh spain@spain 'sudo gluck-files-acl ls dad'
 ssh spain@spain 'sudo gluck-files-acl check dad wfh/Rental_Agreement.pdf read'
 ssh spain@spain 'sudo gluck-files-acl revoke dad dad/ --list'

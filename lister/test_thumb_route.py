@@ -201,6 +201,47 @@ class Refused(Base):
             self.get("/_thumb/users/pilar/camera/20240512_101010.jpg")
 
 
+class Granted(Base):
+    def setUp(self):
+        super().setUp()
+        L.CLIENT_PREFIXES = {}
+        L.ACL.grant("user:admin", "users/pilar/", "read", "fixture")
+        L.ACL.grant("user:admin", "users/pilar/", "list", "fixture")
+
+    def test_a_named_user_gets_the_bytes_the_owner_gets(self):
+        owner = self.get("/_thumb/users/pilar/camera/20240512_101010.jpg")
+        r = self.get("/_thumb/users/pilar/camera/20240512_101010.jpg", user="admin", groups="files-admin")
+        self.assertEqual((r.status_code, r.data), (200, THUMB))
+        self.assertEqual(r.headers["Cache-Control"], owner.headers["Cache-Control"])
+        pending = self.get("/_thumb/users/pilar/camera/20240513_101010.jpg", user="admin", groups="files-admin")
+        self.assertEqual((pending.status_code, pending.headers["X-Thumb"]), (404, "pending"))
+
+    def test_a_thumb_follows_a_row_on_a_folder_inside_the_home(self):
+        L.ACL.revoke("user:admin", "users/pilar/")
+        L.ACL.grant("user:admin", "users/pilar/camera/", "read", "fixture")
+        self.assertEqual(self.get("/_thumb/users/pilar/camera/20240512_101010.jpg", user="admin").status_code, 200)
+        self.assertEqual(self.get("/_thumb/users/pilar/docs/a.jpg", user="admin").headers.get("X-Thumb"), None)
+
+    def test_the_rest_of_the_world_is_still_one_plain_404(self):
+        want = self.shape(self.get("/_thumb/users/nobody/camera/x.jpg", user="admin", groups="files-admin"))
+        for name, r in {
+            "an ungranted user": self.get("/_thumb/users/pilar/camera/20240512_101010.jpg", user="stranger"),
+            "a group member": self.get("/_thumb/users/pilar/camera/20240512_101010.jpg", user="stranger", groups="files-admin,pilar,admin"),
+            "the named user on another home": self.get("/_thumb/users/other/camera/theirs.jpg", user="admin", groups="files-admin"),
+            "the named user, a sibling prefix": self.get("/_thumb/users/pilar2/camera/x.jpg", user="admin", groups="files-admin"),
+            "the named user, climbing": self.get("/_thumb/users/pilar/../other/camera/theirs.jpg", user="admin"),
+        }.items():
+            if name == "the named user, climbing":
+                self.assertIn(r.status_code, (404, 308), name)
+                continue
+            self.assertEqual(self.shape(r), want, name)
+
+    def test_revoking_the_row_stops_the_next_thumb(self):
+        L.ACL.revoke("user:admin", "users/pilar/")
+        r = self.get("/_thumb/users/pilar/camera/20240512_101010.jpg", user="admin", groups="files-admin")
+        self.assertEqual(self.shape(r), self.shape(self.get("/_thumb/users/nobody/camera/x.jpg", user="admin")))
+
+
 class Pressure(Base):
     def setUp(self):
         super().setUp()

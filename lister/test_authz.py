@@ -6,6 +6,8 @@ import tempfile
 import unittest
 from unittest.mock import Mock
 
+from botocore.config import Config
+
 TMP = tempfile.TemporaryDirectory()
 os.environ.update({
     'LISTER_TEMPLATE': '/dev/null', 'LISTER_BUCKETS': 'files',
@@ -16,6 +18,7 @@ os.environ.update({
 })
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from acl import BadPath, canonical_object_uri
+from place import Places
 import lister as L
 
 
@@ -148,6 +151,73 @@ class Authorisation(unittest.TestCase):
     def test_unknown_bucket_is_denied(self):
         r=self.client.get('/_files/authz',base_url='http://graveyard.kelliher.info',headers={'Remote-User':'alice','X-Forwarded-Uri':'/dad/a.mp3','X-Forwarded-Method':'GET'})
         self.assertEqual(r.status_code,403)
+
+
+class HomeAuthorisation(unittest.TestCase):
+    def setUp(self):
+        L.app.config['TESTING'] = True
+        self.client = L.app.test_client()
+        for g in L.ACL.list_grants():
+            L.ACL.revoke(g['subject'], g['path'], g['perm'])
+        keys = tempfile.mkdtemp()
+        for owner, key_id in (('mom', 'GKMOM'), ('kid', 'GKKID')):
+            with open(os.path.join(keys, owner), 'w') as f:
+                f.write(f'AWS_ACCESS_KEY_ID={key_id}\nAWS_SECRET_ACCESS_KEY=fixture-{owner}\n')
+        self.places = L.PLACES
+        L.PLACES = Places(Mock(), 'files', 'http://127.0.0.1:3900', 'spain', Config(signature_version='s3v4'), keys_dir=keys)
+        for perm in ('read', 'list', 'write'):
+            L.ACL.grant('user:mom', 'users/mom/', perm, 'fixture')
+            L.ACL.grant('user:kid', 'users/kid/', perm, 'fixture')
+            L.ACL.grant('group:files-admin', '', perm, 'fixture')
+        L.ACL.grant('user:admin', 'users/mom/', 'read', 'fixture')
+
+    def tearDown(self):
+        L.PLACES = self.places
+
+    def ask(self, uri='/users/mom/photos/a.jpg', user='admin', groups='files-admin', method='GET'):
+        h = {'X-Forwarded-Uri': uri, 'X-Forwarded-Method': method, 'Remote-Groups': groups}
+        if user is not None:
+            h['Remote-User'] = user
+        return self.client.get('/_files/authz', base_url='http://files.kelliher.info', headers=h)
+
+    def test_the_owner_and_the_named_user_are_both_served_with_the_owners_key(self):
+        for user in ('mom', 'admin'):
+            r = self.ask(user=user)
+            self.assertEqual(r.status_code, 200, user)
+            signed = r.headers['X-Files-Signed']
+            self.assertTrue(signed.startswith('/u-mom/photos/a.jpg?'), signed)
+            self.assertIn('X-Amz-Credential=GKMOM%2F', signed)
+            self.assertNotIn('GKKID', signed)
+            self.assertNotIn('X-Files-URI', r.headers)
+
+    def test_an_ungranted_user_and_a_group_member_are_refused(self):
+        for user, groups in (('kid', ''), ('kid', 'files-admin'), ('kid', 'files-admin,mom,admin'), ('stranger', 'mom')):
+            r = self.ask(user=user, groups=groups)
+            self.assertEqual(r.status_code, 403, (user, groups))
+            self.assertNotIn('X-Files-Signed', r.headers)
+
+    def test_the_root_group_grant_alone_does_not_open_a_home(self):
+        L.ACL.revoke('user:admin', 'users/mom/', 'read')
+        self.assertEqual(self.ask().status_code, 403)
+
+    def test_the_named_row_reaches_no_other_home_and_does_not_climb(self):
+        for uri in ('/users/kid/a.jpg', '/users/mom2/a.jpg', '/users/momma/a.jpg', '/users/mom/../kid/a.jpg',
+                    '/users/mom/%2e%2e/kid/a.jpg', '/users/a.jpg'):
+            r = self.ask(uri)
+            self.assertEqual(r.status_code, 403, uri)
+            self.assertNotIn('X-Files-Signed', r.headers)
+
+    def test_a_list_or_write_row_does_not_read(self):
+        L.ACL.revoke('user:admin', 'users/mom/', 'read')
+        L.ACL.grant('user:admin', 'users/mom/', 'list', 'fixture')
+        L.ACL.grant('user:admin', 'users/mom/', 'write', 'fixture')
+        self.assertEqual(self.ask().status_code, 403)
+
+    def test_revoking_the_row_closes_the_home_on_the_next_request(self):
+        self.assertEqual(self.ask().status_code, 200)
+        L.ACL.revoke('user:admin', 'users/mom/', 'read')
+        self.assertEqual(self.ask().status_code, 403)
+        self.assertEqual(self.ask(user='mom').status_code, 200)
 
 
 if __name__=='__main__':unittest.main(verbosity=2)

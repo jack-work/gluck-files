@@ -894,6 +894,7 @@
           thumb-hook = suite "thumb-hook" "test_thumb_hook.py";
           thumb-route = suite "thumb-route" "test_thumb_route.py";
           thumbsctl = suite "thumbsctl" "test_thumbsctl.py";
+          home-writes = suite "home-writes" "test_home_writes.py";
           scheme = (suite "scheme" "test_scheme.py").overrideAttrs { LISTER_TEMPLATE_BUILT = listerTemplateFor pkgs; };
 
           socket = pkgs.runCommand "gluck-files-socket" { } ''
