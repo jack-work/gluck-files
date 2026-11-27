@@ -22,6 +22,8 @@ CAMERA = (
     "users/ctkelliher/camera/20240601_090000.jpg",
     "users/admin/notes/todo.txt",
     "photos/2024/20240101_120000.jpg",
+    "users/xavier/photos/20240101_100000.jpg",
+    "users/xavier/docs/a.txt",
 )
 
 
@@ -124,6 +126,24 @@ class InTheListing(Asking):
     def test_a_shared_only_user_gets_the_shared_tree_as_the_default(self):
         _, m = self.page("/dad/", "dad")
         self.assertEqual((m.details, m.chip[0], m.chip[1]), (0, "/", "page"))
+
+    def test_rows_only_below_a_home_open_a_listing_of_those_folders_from_the_root_url(self):
+        L.ACL.grant("user:friend", "users/xavier/photos/", "read", "t")
+        L.ACL.grant("user:friend", "users/xavier/photos/", "list", "t")
+        L.ACL.grant("user:friend", "users/xavier/docs/", "list", "t")
+        found = L.buckets_for("friend", [])
+        self.assertEqual([(b["id"], b["root_url"]) for b in found], [("home-xavier", "/users/xavier/")])
+        r = self.ask("/users/xavier/", "friend", "")
+        self.assertEqual(r.status_code, 200)
+        page = r.get_data(as_text=True)
+        self.assertIn('href="/users/xavier/photos/"', page)
+        self.assertIn('href="/users/xavier/docs/"', page)
+        self.assertNotIn('href="/users/xavier/other/"', page)
+        for folder in ("photos", "docs"):
+            self.assertEqual(self.ask(f"/users/xavier/{folder}/", "friend", "").status_code, 200, folder)
+        self.assertEqual(self.ask("/users/xavier/secret/", "friend", "").status_code, 404)
+        _, m = self.page("/users/xavier/", "friend")
+        self.assertEqual((m.details, m.chip[0], m.chip[1]), (0, "/users/xavier/", "page"))
 
     def test_nobody_is_shown_a_bucket_they_hold_no_row_for(self):
         body, m = self.page("/users/pilar/", "pilar")
