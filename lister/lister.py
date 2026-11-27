@@ -40,6 +40,7 @@ from markupsafe import escape
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from acl import Acl, BadPath, canonical_object_uri, media_request, normalise
+from buckets import buckets_for as buckets_held
 from caption_gate import CaptionGate, ManifestUnavailable
 from place import Places, Unplaced, home_owner
 from save import UNDATED, day_of, kind_of
@@ -317,6 +318,10 @@ def granted_subtrees(user, groups, prefix):
     return sorted(set(out))
 
 
+def buckets_for(user, groups):
+    return buckets_held(ACL, user, groups)
+
+
 SCHEMES = {"light", "dark"}
 
 
@@ -511,6 +516,21 @@ def render(bucket, prefix, user, groups):
         first_href=here,
         continued=continued,
     )
+
+
+@app.get("/_files/api/buckets")
+def api_buckets():
+    headers = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
+    user = caller()
+    if not user:
+        return Response("unauthenticated\n", status=401, mimetype="text/plain", headers=headers)
+    if bucket_for(request.host) is None:
+        return Response("not found\n", status=404, mimetype="text/plain", headers=headers)
+    if (request.headers.get("Remote-Client") or "").strip():
+        return Response("denied\n", status=403, mimetype="text/plain", headers=headers)
+    found = buckets_for(user, caller_groups())
+    body = {"home": "home" if any(b["id"] == "home" for b in found) else None, "buckets": found}
+    return Response(json.dumps(body, separators=(",", ":")) + "\n", mimetype="application/json", headers=headers)
 
 
 @app.route("/healthz")
