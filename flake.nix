@@ -17,6 +17,7 @@
         cp ${./lister/upload.py} $out/upload.py
         cp ${./lister/save.py} $out/save.py
         cp ${./lister/place.py} $out/place.py
+        cp ${./lister/buckets.py} $out/buckets.py
         cp ${./lister/thumbs.py} $out/thumbs.py
         cp ${./lister/thumbrender.py} $out/thumbrender.py
         cp ${./lister/thumbsctl.py} $out/thumbsctl.py
@@ -895,6 +896,7 @@
           thumb-route = suite "thumb-route" "test_thumb_route.py";
           thumbsctl = suite "thumbsctl" "test_thumbsctl.py";
           home-writes = suite "home-writes" "test_home_writes.py";
+          buckets = suite "buckets" "test_buckets.py";
           scheme = (suite "scheme" "test_scheme.py").overrideAttrs { LISTER_TEMPLATE_BUILT = listerTemplateFor pkgs; };
 
           socket = pkgs.runCommand "gluck-files-socket" { } ''
