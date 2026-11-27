@@ -89,7 +89,7 @@ class InTheListing(Asking):
     def test_the_menu_lists_every_bucket_with_a_link_that_is_a_listing_url(self):
         _, m = self.page("/users/admin/", *ADMIN)
         self.assertEqual(m.details, 1)
-        self.assertEqual(m.links, [("home", "/users/admin/"), ("shared", "/"), ("home-ctkelliher", "/users/ctkelliher/")])
+        self.assertEqual(m.links, [("home", "/users/admin/"), ("ctkelliher", "/users/ctkelliher/"), ("shared", "/")])
 
     def test_the_home_bucket_is_in_the_nav_by_default_wherever_you_are(self):
         for path in ("/", "/users/ctkelliher/", "/users/ctkelliher/camera/", "/photos/", "/users/admin/notes/"):
@@ -98,7 +98,7 @@ class InTheListing(Asking):
 
     def test_the_bucket_you_are_in_is_marked_and_only_that_one(self):
         for path, want in (("/users/admin/", "home"), ("/users/admin/notes/", "home"), ("/", "shared"), ("/photos/", "shared"),
-                           ("/users/ctkelliher/", "home-ctkelliher"), ("/users/ctkelliher/camera/", "home-ctkelliher")):
+                           ("/users/ctkelliher/", "ctkelliher"), ("/users/ctkelliher/camera/", "ctkelliher")):
             _, m = self.page(path, *ADMIN)
             self.assertEqual(m.current, [want], path)
             self.assertEqual(m.chip[1], "page" if want == "home" else None, path)
@@ -123,6 +123,17 @@ class InTheListing(Asking):
         self.assertEqual((m.details, m.links, m.chip[0], m.chip[1]), (0, [], "/users/pilar/", "page"))
         self.assertIn(">Your files</a>", body)
 
+    def test_a_root_home_marks_itself_everywhere_but_inside_a_granted_home(self):
+        L.ACL.revoke("user:admin", "users/admin/")
+        for path, want in (("/", "home"), ("/photos/", "home"),
+                           ("/users/ctkelliher/", "ctkelliher")):
+            body, m = self.page(path, *ADMIN)
+            self.assertEqual(m.current, [want], path)
+            self.assertNotIn(">Shared<", body)
+        _, m = self.page("/", *ADMIN)
+        self.assertEqual(m.links, [("home", "/"), ("ctkelliher", "/users/ctkelliher/")])
+        self.assertEqual(m.chip[0], "/")
+
     def test_a_shared_only_user_gets_the_shared_tree_as_the_default(self):
         _, m = self.page("/dad/", "dad")
         self.assertEqual((m.details, m.chip[0], m.chip[1]), (0, "/", "page"))
@@ -132,7 +143,7 @@ class InTheListing(Asking):
         L.ACL.grant("user:friend", "users/xavier/photos/", "list", "t")
         L.ACL.grant("user:friend", "users/xavier/docs/", "list", "t")
         found = L.buckets_for("friend", [])
-        self.assertEqual([(b["id"], b["root_url"]) for b in found], [("home-xavier", "/users/xavier/")])
+        self.assertEqual([(b["id"], b["root_url"]) for b in found], [("xavier", "/users/xavier/")])
         r = self.ask("/users/xavier/", "friend", "")
         self.assertEqual(r.status_code, 200)
         page = r.get_data(as_text=True)

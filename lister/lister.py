@@ -40,7 +40,7 @@ from markupsafe import escape
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from acl import Acl, BadPath, canonical_object_uri, media_request, normalise
-from buckets import bucket_id_of, buckets_for as buckets_held
+from buckets import buckets_for as buckets_held, current_id, default_bucket
 from caption_gate import CaptionGate, ManifestUnavailable
 from place import Places, Unplaced, home_owner
 from save import UNDATED, day_of, kind_of
@@ -480,7 +480,7 @@ def render(bucket, prefix, user, groups):
         day_href = lambda month: "/_save/?" + urlencode({"root": home_rel, "month": month})
     here = "/" + prefix
     reachable = buckets_for(user, groups)
-    nav_default = next((b for b in reachable if b["id"] == "home"), reachable[0] if reachable else None)
+    nav_default = default_bucket(reachable)
     pick_href = None
     if select and picks:
         pick_href = "/_save/?" + urlencode([("root", home_rel)] + [("pick", n) for n in sorted(picks)][:PICK_CAP + 1])
@@ -519,7 +519,7 @@ def render(bucket, prefix, user, groups):
         continued=continued,
         nav_default=nav_default,
         nav_buckets=reachable,
-        nav_current=bucket_id_of(prefix, user),
+        nav_current=current_id(prefix, reachable),
     )
 
 
@@ -534,7 +534,8 @@ def api_buckets():
     if (request.headers.get("Remote-Client") or "").strip():
         return Response("denied\n", status=403, mimetype="text/plain", headers=headers)
     found = buckets_for(user, caller_groups())
-    body = {"home": "home" if any(b["id"] == "home" for b in found) else None, "buckets": found}
+    landing = default_bucket(found)
+    body = {"home": landing["id"] if landing else None, "buckets": found}
     return Response(json.dumps(body, separators=(",", ":")) + "\n", mimetype="application/json", headers=headers)
 
 

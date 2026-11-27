@@ -56,10 +56,10 @@ await test("opening the menu lists every readable bucket as a link, inside the v
   await page.goto("/users/admin/");
   await page.click(".p-menu summary");
   assert.deepEqual(await links(page), [
-    ["home", "/users/admin/"], ["shared", "/"], ["home-ctkelliher", "/users/ctkelliher/"], ["home-pilar", "/users/pilar/"],
+    ["home", "/users/admin/"], ["ctkelliher", "/users/ctkelliher/"], ["pilar", "/users/pilar/"], ["shared", "/"],
   ]);
   const labels = await page.$$eval(".p-menu a .nm", (e) => e.map((x) => x.textContent));
-  assert.deepEqual(labels, ["Your files", "Shared", "ctkelliher's files", "pilar's files"]);
+  assert.deepEqual(labels, ["Your files", "ctkelliher", "pilar", "Shared"]);
   const access = await page.$$eval(".p-menu a .acc", (e) => e.map((x) => x.textContent));
   assert.deepEqual(access, ["read, list, write", "read, list, write", "read, list, write", "read, list, write"]);
   const vp = page.viewportSize();
@@ -93,10 +93,10 @@ await test("choosing a bucket opens its listing, marks it, and keeps the home ch
   const { ctx, page } = await open(width, ADMIN);
   await page.goto("/users/admin/");
   await page.click(".p-menu summary");
-  await page.click('.p-menu a[data-bucket="home-ctkelliher"]');
+  await page.click('.p-menu a[data-bucket="ctkelliher"]');
   await page.waitForURL("**/users/ctkelliher/");
   assert.equal(await page.textContent(".p-title h1"), "ctkelliher");
-  assert.deepEqual(await page.$$eval('.p-menu a[aria-current="page"]', (e) => e.map((x) => x.dataset.bucket)), ["home-ctkelliher"]);
+  assert.deepEqual(await page.$$eval('.p-menu a[aria-current="page"]', (e) => e.map((x) => x.dataset.bucket)), ["ctkelliher"]);
   const chip = page.locator(".p-buckets > a");
   assert.equal(await chip.getAttribute("href"), "/users/admin/");
   assert.equal(await chip.getAttribute("aria-current"), null);
@@ -151,7 +151,7 @@ await test("a user with no home row defaults to the shared tree", async (width) 
   assert.equal((await page.textContent(".p-buckets > a")).trim(), "Shared");
   assert.equal(await page.getAttribute(".p-buckets > a", "href"), "/");
   const api = await (await ctx.request.get("/_files/api/buckets")).json();
-  assert.deepEqual(api, { home: null, buckets: [{ id: "shared", label: "Shared", root_url: "/", access: ["read", "list"], kind: "shared" }] });
+  assert.deepEqual(api, { home: "shared", buckets: [{ id: "shared", label: "Shared", root_url: "/", access: ["read", "list"], kind: "shared" }] });
   await ctx.close();
 });
 

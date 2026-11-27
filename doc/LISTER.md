@@ -86,9 +86,12 @@ from ACL rows only (`lister/buckets.py`, `buckets_for(user, groups)`):
 
 | id | label | root_url | when |
 |---|---|---|---|
-| `home` | Your files | `/users/<me>/` | a row of the caller's own on their home |
+| `home` | Your files | `/users/<me>/` | a list row of the caller's own on their home |
+| `home` | Your files | `/` | no home row, and the caller holds the root grant (a list row on the whole tree, `files-admin` today); `shared` is then not offered |
+| `<owner>` | `<owner>` | `/users/<owner>/` | a row naming the caller on that home or a folder in it (granted) |
 | `shared` | Shared | `/` | a list row outside `users/`, the caller's or a group's |
-| `home-<owner>` | `<owner>'s files` | `/users/<owner>/` | a row naming the caller on that home or a folder in it |
+
+Menu order is home, then granted by label, then shared.
 
 Rules, each pinned in `test_buckets.py`:
 
@@ -104,14 +107,18 @@ Rules, each pinned in `test_buckets.py`:
 - `root_url` is a listing URL that exists. Where the caller holds a row on one
   folder only, it opens a listing of just that folder (`granted_subtrees`).
 
-`GET /_files/api/buckets` returns `{"home": "home", "buckets": [...]}` for the
-caller, `Cache-Control: no-store`. `home` is `null` when the caller holds no row
-on a home of their own. No `Remote-User` is 401, an unlisted Host is 404, and a
-bearer client (`Remote-Client`) is 403. The edge must route the path to the
-lister like the other `/_files/` routes.
+`GET /_files/api/buckets` returns `{"home": "<id>", "buckets": [...]}` for the
+caller, `Cache-Control: no-store`. `home` is the id of the bucket to land in: the
+`home` bucket, else `shared`, else the first. It is `null` only when the caller
+can list nothing. A granted owner named `home` or `shared` (the name rule allows
+both) gets `user-home` or `user-shared`, and `user-` is added again for an owner
+who spells the escaped form, so granted ids never meet the reserved two. No
+`Remote-User` is 401, an unlisted Host is 404, and a bearer client
+(`Remote-Client`) is 403. The edge must route the path to the lister like the
+other `/_files/` routes.
 
-The listing shows the default bucket (home, else the first) in the nav and, when
-the caller has more than one, a `Buckets` menu: a `<details>` of plain links to
+The listing shows the default bucket (the same one `home` names) in the nav and,
+when the caller has more than one, a `Buckets` menu: a `<details>` of plain links to
 each `root_url`. Nothing in it needs script, so every bucket view is a link.
 Upload, save and select stay on the caller's own home.
 

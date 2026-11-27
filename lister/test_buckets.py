@@ -14,7 +14,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from acl import Acl  # noqa: E402
-from buckets import bucket_id_of, buckets_for  # noqa: E402
+from buckets import buckets_for, current_id, default_bucket  # noqa: E402
 
 TMP = tempfile.mkdtemp()
 KEYS = {"id", "label", "root_url", "access", "kind"}
@@ -65,23 +65,23 @@ class WhatIsListed(Base):
     def test_a_granted_home_is_named_for_its_owner(self):
         self.give("user:admin", "users/ctkelliher/", "read", "list", "write")
         self.assertEqual(self.found("admin", ["files-admin"]), [
-            entry("home-ctkelliher", "ctkelliher's files", "/users/ctkelliher/", ["read", "list", "write"], "granted")])
+            entry("ctkelliher", "ctkelliher", "/users/ctkelliher/", ["read", "list", "write"], "granted")])
 
     def test_a_row_on_a_folder_inside_a_home_opens_that_home_at_its_root_url(self):
         self.give("user:admin", "users/ctkelliher/camera/", "read", "list")
         self.assertEqual(self.found("admin"), [
-            entry("home-ctkelliher", "ctkelliher's files", "/users/ctkelliher/", ["read", "list"], "granted")])
+            entry("ctkelliher", "ctkelliher", "/users/ctkelliher/", ["read", "list"], "granted")])
 
-    def test_everything_at_once_is_home_then_shared_then_granted_by_owner(self):
+    def test_everything_at_once_is_home_then_granted_by_owner_then_shared(self):
         self.give("user:admin", "users/admin/", "read", "list", "write")
         self.give("group:files-admin", "", "read", "list", "write")
         self.give("user:admin", "users/zoe/", "read", "list")
         self.give("user:admin", "users/ctkelliher/", "read", "list", "write")
         self.assertEqual(self.found("admin", ["files-admin"]), [
             entry("home", "Your files", "/users/admin/", ["read", "list", "write"], "home"),
+            entry("ctkelliher", "ctkelliher", "/users/ctkelliher/", ["read", "list", "write"], "granted"),
+            entry("zoe", "zoe", "/users/zoe/", ["read", "list"], "granted"),
             entry("shared", "Shared", "/", ["read", "list", "write"], "shared"),
-            entry("home-ctkelliher", "ctkelliher's files", "/users/ctkelliher/", ["read", "list", "write"], "granted"),
-            entry("home-zoe", "zoe's files", "/users/zoe/", ["read", "list"], "granted"),
         ])
 
     def test_access_is_in_one_order_whatever_the_order_of_the_rows(self):
@@ -105,9 +105,91 @@ class WhatIsListed(Base):
 
     def test_the_answer_follows_the_rows_at_once(self):
         self.give("user:admin", "users/pilar/", "read", "list")
-        self.assertEqual(self.ids("admin"), ["home-pilar"])
+        self.assertEqual(self.ids("admin"), ["pilar"])
         self.acl.revoke("user:admin", "users/pilar/")
         self.assertEqual(self.ids("admin"), [])
+
+
+class EveryCallerWithSomethingToListHasAHome(Base):
+    def test_admin_with_only_the_root_grant_has_home_at_the_root_and_no_shared(self):
+        self.give("group:files-admin", "", "read", "list", "write")
+        self.give("user:admin", "users/ctkelliher/", "read", "list", "write")
+        self.assertEqual(self.found("admin", ["files-admin"]), [
+            entry("home", "Your files", "/", ["read", "list", "write"], "home"),
+            entry("ctkelliher", "ctkelliher", "/users/ctkelliher/", ["read", "list", "write"], "granted"),
+        ])
+
+    def test_an_ordinary_user_has_her_home_under_users(self):
+        self.give("user:pilar", "users/pilar/", "read", "list", "write")
+        self.give("group:family", "photos/", "read", "list")
+        got = self.found("pilar", ["family"])
+        self.assertEqual([(b["id"], b["root_url"]) for b in got], [("home", "/users/pilar/"), ("shared", "/")])
+
+    def test_a_home_row_wins_over_the_root_grant_and_shared_stays(self):
+        self.give("group:files-admin", "", "read", "list", "write")
+        self.give("user:admin", "users/admin/", "read", "list", "write")
+        got = self.found("admin", ["files-admin"])
+        self.assertEqual([(b["id"], b["root_url"]) for b in got], [("home", "/users/admin/"), ("shared", "/")])
+
+    def test_a_caller_with_no_rows_has_no_home_and_no_default(self):
+        self.give("group:files-admin", "", "read", "list", "write")
+        got = self.found("stranger", ["family"])
+        self.assertEqual(got, [])
+        self.assertIsNone(default_bucket(got))
+
+    def test_the_root_home_needs_a_list_row_at_the_root(self):
+        self.give("group:files-admin", "", "read", "write")
+        self.assertEqual(self.found("admin", ["files-admin"]), [])
+        self.give("group:files-admin", "photos/", "list")
+        self.assertEqual(self.ids("admin", ["files-admin"]), ["shared"])
+
+    def test_the_root_home_access_comes_from_the_root_rows_alone(self):
+        self.give("group:files-admin", "", "read", "list")
+        self.give("group:files-admin", "inbox/", "write")
+        self.assertEqual(self.found("admin", ["files-admin"])[0]["access"], ["read", "list"])
+
+    def test_the_root_grant_can_be_the_callers_own_row(self):
+        self.give("user:solo", "", "list")
+        self.assertEqual(self.found("solo"), [entry("home", "Your files", "/", ["list"], "home")])
+
+    def test_a_row_below_the_root_is_not_the_root_grant(self):
+        self.give("user:dad", "dad/", "read", "list")
+        self.assertEqual(self.found("dad"), [entry("shared", "Shared", "/", ["read", "list"], "shared")])
+
+
+class AGrantedHomeCannotTakeAReservedId(Base):
+    def test_owners_named_home_or_shared_are_prefixed(self):
+        self.give("user:admin", "users/home/", "read", "list")
+        self.give("user:admin", "users/shared/", "read", "list")
+        self.give("user:admin", "users/users/", "read", "list")
+        self.give("group:files-admin", "", "read", "list")
+        got = self.found("admin", ["files-admin"])
+        self.assertEqual([(b["id"], b["label"], b["root_url"]) for b in got], [
+            ("home", "Your files", "/"),
+            ("user-home", "home", "/users/home/"),
+            ("user-shared", "shared", "/users/shared/"),
+            ("users", "users", "/users/users/"),
+        ])
+        self.assertEqual([b["kind"] for b in got], ["home", "granted", "granted", "granted"])
+
+    def test_the_escape_cannot_be_forged_by_an_owner_who_spells_it(self):
+        for owner in ("home", "user-home", "user-user-home", "shared", "user-shared"):
+            self.give("user:admin", f"users/{owner}/", "read", "list")
+        got = self.found("admin")
+        ids = [b["id"] for b in got]
+        self.assertEqual(len(set(ids)), len(ids))
+        self.assertNotIn("home", ids)
+        self.assertNotIn("shared", ids)
+        self.assertEqual({b["label"]: b["id"] for b in got}, {
+            "home": "user-home", "user-home": "user-user-home", "user-user-home": "user-user-user-home",
+            "shared": "user-shared", "user-shared": "user-user-shared"})
+
+    def test_a_user_named_home_has_a_home_and_the_id_is_still_unique(self):
+        self.give("user:home", "users/home/", "read", "list")
+        self.give("user:home", "users/pilar/", "read", "list")
+        self.assertEqual(self.ids("home"), ["home", "pilar"])
+        self.give("user:pilar", "users/home/", "read", "list")
+        self.assertEqual(self.ids("pilar"), ["user-home"])
 
 
 class NeverABucketWithoutARow(Base):
@@ -127,19 +209,22 @@ class NeverABucketWithoutARow(Base):
             self.assertEqual(self.found(user), [])
             self.assertEqual(self.found(user, []), [])
 
-    def test_the_groups_of_no_caller_open_only_the_shared_tree(self):
-        self.assertEqual(self.ids(None, ["files-admin"]), ["shared"])
-        self.assertEqual(self.ids("", ["files-admin"]), ["shared"])
+    def test_the_groups_of_no_caller_open_only_the_root(self):
+        for user in (None, ""):
+            self.assertEqual(self.found(user, ["files-admin"]), [
+                entry("home", "Your files", "/", ["read", "list", "write"], "home")])
 
-    def test_the_admin_group_is_not_a_key_to_anyones_home(self):
-        self.assertEqual(self.ids("root", ["files-admin"]), ["shared"])
+    def test_the_admin_group_is_not_a_key_to_anyones_home_row(self):
+        self.assertEqual(self.found("root", ["files-admin"]), [
+            entry("home", "Your files", "/", ["read", "list", "write"], "home")])
         self.assertEqual(self.ids("pilar", ["files-admin"]), ["home", "shared"])
+        self.assertEqual(self.found("pilar", ["files-admin"])[0]["root_url"], "/users/pilar/")
 
     def test_a_group_row_under_users_is_inert_even_when_it_is_in_the_table(self):
         self.inject("group:files-admin", "users/other/", "read")
         self.inject("group:files-admin", "users/other/", "list")
         self.inject("group:family", "users/pilar/camera/", "read")
-        self.assertEqual(self.ids("root", ["files-admin"]), ["shared"])
+        self.assertEqual(self.ids("root", ["files-admin"]), ["home"])
         self.assertEqual(self.ids("friend", ["family"]), [])
 
     def test_a_row_naming_someone_else_is_not_mine(self):
@@ -160,7 +245,7 @@ class NeverABucketWithoutARow(Base):
     def test_someone_granted_into_a_home_does_not_get_a_home_of_their_own(self):
         self.give("user:other", "users/pilar/", "read", "list")
         got = self.found("other")
-        self.assertEqual([(b["id"], b["kind"]) for b in got], [("home", "home"), ("home-pilar", "granted")])
+        self.assertEqual([(b["id"], b["kind"]) for b in got], [("home", "home"), ("pilar", "granted")])
         self.assertEqual(got[0]["root_url"], "/users/other/")
 
     def test_a_grant_into_a_home_does_not_go_the_other_way(self):
@@ -190,7 +275,7 @@ class NeverABucketWithoutARow(Base):
         self.give("user:eve", "dad/", "read")
         self.give("user:eve", "users/other/photos/", "list")
         got = self.found("eve")
-        self.assertEqual([b["id"] for b in got], ["home-other"])
+        self.assertEqual([b["id"] for b in got], ["other"])
         self.assertEqual(got[0]["access"], ["list"])
 
     def test_the_users_folder_itself_is_never_a_bucket(self):
@@ -245,7 +330,7 @@ class NeverABucketWithoutARow(Base):
         self.give("user:admin", "users/other/", "read", "list")
         self.give("user:admin", "dad/", "read", "list")
         ids = self.ids("admin", ["files-admin"])
-        self.assertEqual(ids, ["home", "shared", "home-other", "home-pilar"])
+        self.assertEqual(ids, ["home", "other", "pilar", "shared"])
         for b in self.found("admin", ["files-admin"]):
             self.assertIn(b["kind"], ("home", "shared", "granted"))
             self.assertTrue(b["root_url"].startswith("/"))
@@ -259,18 +344,40 @@ class NeverABucketWithoutARow(Base):
 
 
 class WhereAPrefixSits(unittest.TestCase):
-    def test_a_listing_prefix_maps_to_its_bucket_id(self):
+    def test_a_listing_prefix_maps_to_the_bucket_with_the_deepest_root_url(self):
+        buckets = [
+            entry("home", "Your files", "/users/pilar/", ["read", "list"], "home"),
+            entry("other", "other", "/users/other/", ["read", "list"], "granted"),
+            entry("shared", "Shared", "/", ["read", "list"], "shared"),
+        ]
         for prefix, want in (
             ("users/pilar/", "home"),
             ("users/pilar/camera/2024/", "home"),
-            ("users/other/", "home-other"),
-            ("users/other/camera/", "home-other"),
+            ("users/other/", "other"),
+            ("users/other/camera/", "other"),
             ("", "shared"),
             ("dad/", "shared"),
             ("users-archive/", "shared"),
-            ("users/", None),
+            ("users/pilar2/", "shared"),
         ):
-            self.assertEqual(bucket_id_of(prefix, "pilar"), want, prefix)
+            self.assertEqual(current_id(prefix, buckets), want, prefix)
+
+    def test_no_bucket_is_current_outside_every_root_url(self):
+        buckets = [entry("home", "Your files", "/users/pilar/", ["read", "list"], "home")]
+        self.assertIsNone(current_id("users/", buckets))
+        self.assertIsNone(current_id("dad/", buckets))
+        self.assertIsNone(current_id("", []))
+
+
+class WhereACallerLands(unittest.TestCase):
+    def test_home_then_shared_then_the_first_bucket_then_nothing(self):
+        home = entry("home", "Your files", "/users/me/", ["list"], "home")
+        shared = entry("shared", "Shared", "/", ["list"], "shared")
+        granted = entry("zoe", "zoe", "/users/zoe/", ["list"], "granted")
+        self.assertEqual(default_bucket([granted, shared, home]), home)
+        self.assertEqual(default_bucket([granted, shared]), shared)
+        self.assertEqual(default_bucket([granted]), granted)
+        self.assertIsNone(default_bucket([]))
 
 
 if __name__ == "__main__":

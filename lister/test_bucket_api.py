@@ -44,8 +44,16 @@ class Api(Asking):
         self.assertEqual(r.mimetype, "application/json")
         self.assertEqual(r.get_json(), {"home": "home", "buckets": [
             {"id": "home", "label": "Your files", "root_url": "/users/admin/", "access": ["read", "list", "write"], "kind": "home"},
+            {"id": "ctkelliher", "label": "ctkelliher", "root_url": "/users/ctkelliher/",
+             "access": ["read", "list", "write"], "kind": "granted"},
             {"id": "shared", "label": "Shared", "root_url": "/", "access": ["read", "list", "write"], "kind": "shared"},
-            {"id": "home-ctkelliher", "label": "ctkelliher's files", "root_url": "/users/ctkelliher/",
+        ]})
+
+    def test_the_root_grant_is_a_home_at_the_root_when_there_is_no_home_row(self):
+        L.ACL.revoke("user:admin", "users/admin/")
+        self.assertEqual(self.api().get_json(), {"home": "home", "buckets": [
+            {"id": "home", "label": "Your files", "root_url": "/", "access": ["read", "list", "write"], "kind": "home"},
+            {"id": "ctkelliher", "label": "ctkelliher", "root_url": "/users/ctkelliher/",
              "access": ["read", "list", "write"], "kind": "granted"},
         ]})
 
@@ -58,8 +66,8 @@ class Api(Asking):
         self.assertEqual(self.api("pilar", "").get_json(), {"home": "home", "buckets": [
             {"id": "home", "label": "Your files", "root_url": "/users/pilar/", "access": ["read", "list", "write"], "kind": "home"}]})
 
-    def test_a_shared_reader_has_no_home_to_default_to(self):
-        self.assertEqual(self.api("dad", "").get_json(), {"home": None, "buckets": [
+    def test_a_shared_reader_lands_in_the_shared_tree(self):
+        self.assertEqual(self.api("dad", "").get_json(), {"home": "shared", "buckets": [
             {"id": "shared", "label": "Shared", "root_url": "/", "access": ["read", "list"], "kind": "shared"}]})
 
     def test_a_caller_with_no_rows_is_told_there_is_nothing_not_refused(self):
@@ -68,7 +76,7 @@ class Api(Asking):
 
     def test_the_caller_is_the_remote_user_and_nothing_in_the_query_changes_that(self):
         want = self.api("pilar", "").get_json()
-        for q in ("?user=admin", "?Remote-User=admin", "?groups=files-admin", "?bucket=home-ctkelliher"):
+        for q in ("?user=admin", "?Remote-User=admin", "?groups=files-admin", "?bucket=ctkelliher"):
             self.assertEqual(self.ask("/_files/api/buckets" + q, "pilar", "").get_json(), want, q)
 
     def test_it_is_the_same_function_the_listing_uses(self):
