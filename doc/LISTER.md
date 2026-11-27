@@ -87,13 +87,14 @@ from ACL rows only (`lister/buckets.py`, `buckets_for(user, groups)`):
 | id | label | root_url | when |
 |---|---|---|---|
 | `home` | Your files | `/users/<me>/` | a row of the caller's own on their home |
-| `shared` | Shared | `/` | a read or list row outside `users/`, the caller's or a group's |
+| `shared` | Shared | `/` | a list row outside `users/`, the caller's or a group's |
 | `home-<owner>` | `<owner>'s files` | `/users/<owner>/` | a row naming the caller on that home or a folder in it |
 
 Rules, each pinned in `test_buckets.py`:
 
-- A bucket needs a read or list row inside it. A write-only row opens nothing
-  to look at, so it adds no bucket (`access` still lists `write` beside a read).
+- A bucket needs a list row inside it. A read-only row lets you fetch an object
+  by URL but not browse to it, and a write-only row opens nothing, so neither
+  adds a bucket (`access` still lists `read` and `write` beside a list).
 - Under `users/<owner>/` only `user:<caller>` rows count. A `group:` row there
   is inert, as in `Acl.allows`.
 - A row not in canonical form, a `users/` row, and a home whose owner is not a

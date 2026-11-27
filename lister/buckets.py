@@ -1,7 +1,6 @@
 from acl import PERMS, BadPath, normalise
 from place import HOME, home_owner
 
-READING = ("read", "list")
 USERS = "users/"
 
 
@@ -45,7 +44,7 @@ def ordered(perms):
 
 
 def readable(perms):
-    return any(p in perms for p in READING)
+    return "list" in perms
 
 
 def buckets_for(acl, user, groups):
