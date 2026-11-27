@@ -79,6 +79,41 @@ measured, not inferred.
 An unresolvable host gets **404**, not 403: the same no-existence-leak rule
 `kstack` states for unreadable items.
 
+## Buckets
+
+A caller's buckets are the places the listing will open for them, and they come
+from ACL rows only (`lister/buckets.py`, `buckets_for(user, groups)`):
+
+| id | label | root_url | when |
+|---|---|---|---|
+| `home` | Your files | `/users/<me>/` | a row of the caller's own on their home |
+| `shared` | Shared | `/` | a read or list row outside `users/`, the caller's or a group's |
+| `home-<owner>` | `<owner>'s files` | `/users/<owner>/` | a row naming the caller on that home or a folder in it |
+
+Rules, each pinned in `test_buckets.py`:
+
+- A bucket needs a read or list row inside it. A write-only row opens nothing
+  to look at, so it adds no bucket (`access` still lists `write` beside a read).
+- Under `users/<owner>/` only `user:<caller>` rows count. A `group:` row there
+  is inert, as in `Acl.allows`.
+- A row not in canonical form, a `users/` row, and a home whose owner is not a
+  well-formed name are left out, because `allows` never matches them either.
+- Ids are opaque and stable. The Garage bucket behind a home (`u-<name>`) is
+  never named.
+- `root_url` is a listing URL that exists. Where the caller holds a row on one
+  folder only, it opens a listing of just that folder (`granted_subtrees`).
+
+`GET /_files/api/buckets` returns `{"home": "home", "buckets": [...]}` for the
+caller, `Cache-Control: no-store`. `home` is `null` when the caller holds no row
+on a home of their own. No `Remote-User` is 401, an unlisted Host is 404, and a
+bearer client (`Remote-Client`) is 403. The edge must route the path to the
+lister like the other `/_files/` routes.
+
+The listing shows the default bucket (home, else the first) in the nav and, when
+the caller has more than one, a `Buckets` menu: a `<details>` of plain links to
+each `root_url`. Nothing in it needs script, so every bucket view is a link.
+Upload, save and select stay on the caller's own home.
+
 ## The key
 
 The bootstrap mints `files-lister` itself, the same way it already mints its own
