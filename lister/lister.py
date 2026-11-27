@@ -40,7 +40,7 @@ from markupsafe import escape
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from acl import Acl, BadPath, canonical_object_uri, media_request, normalise
-from buckets import buckets_for as buckets_held
+from buckets import bucket_id_of, buckets_for as buckets_held
 from caption_gate import CaptionGate, ManifestUnavailable
 from place import Places, Unplaced, home_owner
 from save import UNDATED, day_of, kind_of
@@ -479,6 +479,8 @@ def render(bucket, prefix, user, groups):
         save_href = "/_save/?" + urlencode({"root": home_rel})
         day_href = lambda month: "/_save/?" + urlencode({"root": home_rel, "month": month})
     here = "/" + prefix
+    reachable = buckets_for(user, groups)
+    nav_default = next((b for b in reachable if b["id"] == "home"), reachable[0] if reachable else None)
     pick_href = None
     if select and picks:
         pick_href = "/_save/?" + urlencode([("root", home_rel)] + [("pick", n) for n in sorted(picks)][:PICK_CAP + 1])
@@ -515,6 +517,9 @@ def render(bucket, prefix, user, groups):
         total_n=total_files,
         first_href=here,
         continued=continued,
+        nav_default=nav_default,
+        nav_buckets=reachable,
+        nav_current=bucket_id_of(prefix, user),
     )
 
 

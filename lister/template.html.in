@@ -65,10 +65,23 @@
   .p-tile .playglyph::after { content: ""; position: absolute; left: 19px; top: 12px; border-style: solid; border-width: 11px 0 11px 18px; border-color: transparent transparent transparent #f0dfc8; }
   .p-tile .glyph .wait { font-size: 15px; color: var(--z-muted); }
   .p-foot { margin: 18px 14px 0; font: 17px/1.3 var(--fontpack-mono); color: var(--z-muted); }
+  .p-buckets { position: relative; z-index: 40; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 14px 0; }
+  .p-menu summary { list-style: none; cursor: pointer; }
+  .p-menu summary::-webkit-details-marker { display: none; }
+  .p-menu summary::after { content: ""; border: 6px solid transparent; border-bottom-width: 0; border-top-color: currentColor; }
+  .p-menu[open] summary::after { border-top-width: 0; border-bottom-width: 6px; border-top-color: transparent; border-bottom-color: currentColor; }
+  .p-menu[open] summary { background: var(--z-accent); color: var(--z-on-accent); }
+  .p-menu ul { position: absolute; left: 14px; top: calc(100% + 6px); width: min(360px, calc(100% - 28px)); margin: 0; padding: 8px; display: grid; gap: 6px; list-style: none; border: 3px solid var(--gold); background: var(--z-ground); }
+  .p-menu a { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center; min-height: 56px; padding: 6px 10px; border: 2px solid var(--z-line); background: var(--z-ground-2); color: var(--z-ink); text-decoration: none; }
+  .p-menu a[aria-current=page] { border-color: var(--gold-bright); }
+  .p-menu a:focus-visible, .p-menu summary:focus-visible { outline: 3px dotted var(--z-focus); outline-offset: 3px; }
+  .p-menu .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .p-menu .acc { font: 17px/1 var(--fontpack-mono); color: var(--z-muted); }
   @media (min-width: 900px) {
     .p-mast { padding: 10px 28px; }
     .p-wrap { padding: 0 28px 120px; }
-    .p-crumbs, .p-title, .p-privacy, .p-actions, .p-other, .p-foot { padding-left: 0; padding-right: 0; margin-left: 0; margin-right: 0; }
+    .p-crumbs, .p-title, .p-privacy, .p-actions, .p-other, .p-foot, .p-buckets { padding-left: 0; padding-right: 0; margin-left: 0; margin-right: 0; }
+    .p-menu ul { left: 0; }
     .p-day { padding-left: 0; }
     .p-cards { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); padding: 14px 0; }
     .p-grid { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); padding: 3px 0 0; }
@@ -84,6 +97,20 @@
 </header>
 
 <main class="p-wrap">
+  {% if nav_default %}
+  <nav class="p-buckets" aria-label="Buckets">
+    <a class="p-btn{% if nav_current != nav_default.id %} ghost{% endif %}" href="{{ nav_default.root_url }}"{% if nav_current == nav_default.id %} aria-current="page"{% endif %}>{{ nav_default.label }}</a>
+    {% if nav_buckets|length > 1 %}
+    <details class="p-menu">
+      <summary class="p-btn ghost">Buckets</summary>
+      <ul>
+        {% for b in nav_buckets %}<li><a href="{{ b.root_url }}" data-bucket="{{ b.id }}"{% if b.id == nav_current %} aria-current="page"{% endif %}><span class="nm">{{ b.label }}</span><span class="acc">{{ b.access|join(', ') }}</span></a></li>
+        {% endfor %}
+      </ul>
+    </details>
+    {% endif %}
+  </nav>
+  {% endif %}
   <nav class="p-crumbs" aria-label="Where you are">
     {% if not mine %}<a href="/">files</a>{% endif %}{% for c in crumbs %}{% if not (loop.first and mine) %}<span class="sep">/</span>{% endif %}{% if loop.last %}<span class="here">{{ c.name }}</span>{% else %}<a href="{{ c.href }}">{{ c.name }}</a>{% endif %}{% endfor %}
   </nav>

@@ -898,6 +898,7 @@
           home-writes = suite "home-writes" "test_home_writes.py";
           buckets = suite "buckets" "test_buckets.py";
           bucket-api = suite "bucket-api" "test_bucket_api.py";
+          bucket-menu = (suite "bucket-menu" "test_bucket_menu.py").overrideAttrs { LISTER_TEMPLATE_BUILT = listerTemplateFor pkgs; };
           scheme = (suite "scheme" "test_scheme.py").overrideAttrs { LISTER_TEMPLATE_BUILT = listerTemplateFor pkgs; };
 
           socket = pkgs.runCommand "gluck-files-socket" { } ''
