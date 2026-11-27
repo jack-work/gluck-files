@@ -224,6 +224,13 @@ in
   handle @files_viewer {
     reverse_proxy ${listerAddress}
   }
+  @files_bucket_api {
+    path /_files/api/buckets
+    method GET
+  }
+  handle @files_bucket_api {
+    reverse_proxy ${listerAddress}
+  }
   @files_thumb path /_thumb/*
   handle @files_thumb {
     reverse_proxy ${listerAddress}

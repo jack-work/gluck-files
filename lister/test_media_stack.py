@@ -719,6 +719,29 @@ api_bind_addr = "127.0.0.1:28393"
             for path in ('users/bob/camera/b.jpg', '.thumbs/users/bob/camera/b.jpg.jpg'):
                 self.s3.delete_object(Bucket='files', Key=path)
 
+    def test_29_the_bucket_api_is_the_one_files_path_open_at_the_edge_and_only_to_a_session_get(self):
+        import json
+        status, h, body = self.get('/_files/api/buckets')
+        self.assertEqual(status, 200)
+        self.assertEqual(h['content-type'], 'application/json')
+        self.assertIn('no-store', h['cache-control'])
+        answer = json.loads(body)
+        self.assertEqual(sorted(answer), ['buckets', 'home'])
+        self.assertIn('shared', [b['id'] for b in answer['buckets']])
+        for method, path in [('POST', '/_files/api/buckets'), ('GET', '/_files/api/other'),
+                             ('GET', '/_files/api/buckets/x'), ('GET', '/_files/authz')]:
+            status, h, body = self.get(path, method=method)
+            self.assertEqual(status, 404, (method, path))
+            self.assertNotIn(b'buckets', body)
+        status, h, body = self.bearer('/_files/api/buckets')
+        self.assertEqual(status, 403)
+        self.assertNotIn(b'shared', body)
+        for port in (28780, 28781):
+            status, h, body = self.get('/_files/api/buckets', port=port,
+                                       headers={'Authorization': 'Bearer tv-alice'})
+            self.assertEqual(status, 403, port)
+            self.assertNotIn(b'shared', body)
+
     def test_98_first_auth_transport_error_has_policy(self):
         self.auth.shutdown()
         self.auth.server_close()
